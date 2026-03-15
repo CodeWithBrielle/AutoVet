@@ -11,12 +11,29 @@ use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\ServiceController;
 
-// Public routes
-Route::post('/login', [AuthController::class, 'login'])->name('login');
-Route::post('/logout', [AuthController::class, 'logout']);
+// -----------------------------
+// PUBLIC ROUTES
+// -----------------------------
 
-// Protected routes
+// Login
+Route::post('/login', [AuthController::class, 'login'])->name('login');
+
+// API status check
+Route::get('/status', function () {
+    return response()->json([
+        'status' => 'success',
+        'message' => 'AutoVet Laravel API is up and running!',
+        'timestamp' => now()->toIso8601String(),
+    ]);
+});
+
+// -----------------------------
+// PROTECTED ROUTES (auth:sanctum)
+// -----------------------------
 Route::middleware('auth:sanctum')->group(function () {
+
+    // Logout
+    Route::post('/logout', [AuthController::class, 'logout']);
 
     // Current logged-in user
     Route::get('/me', [AuthController::class, 'me']);  
@@ -45,13 +62,4 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('invoices', InvoiceController::class);
     Route::apiResource('services', ServiceController::class);
     Route::apiResource('users', UserController::class);
-});
-
-// Public status route
-Route::get('/status', function () {
-    return response()->json([
-        'status' => 'success',
-        'message' => 'AutoVet Laravel API is up and running!',
-        'timestamp' => now()->toIso8601String(),
-    ]);
 });
