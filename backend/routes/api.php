@@ -16,10 +16,17 @@ use App\Http\Controllers\AuthController;
 // ---------------------
 // AUTH ROUTES
 // ---------------------
-Route::post('/login', [AuthController::class, 'login']); // public
+Route::post('/login', function () {
+    return response()->json(['message' => 'Login works']);
+});
+
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/logout', [AuthController::class, 'logout']);
-    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/logout', function () {
+        return response()->json(['message' => 'Logout works']);
+    });
+    Route::get('/me', function () {
+        return response()->json(['message' => 'Me works']);
+    });
 });
 
 // ---------------------
