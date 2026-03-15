@@ -3,75 +3,61 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-use App\Http\Controllers\AppointmentController;
-use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\InventoryController;
-use App\Http\Controllers\PatientController;
-use App\Http\Controllers\SettingController;
-use App\Http\Controllers\InvoiceController;
-use App\Http\Controllers\ServiceController;
-use App\Http\Controllers\UserController;
-use App\Http\Controllers\AuthController;
+use App\Http\Controllers\{
+    AppointmentController,
+    ProfileController,
+    InventoryController,
+    PatientController,
+    SettingController,
+    InvoiceController,
+    ServiceController,
+    UserController,
+    AuthController
+};
 
 // ---------------------
-// AUTH ROUTES
+// PUBLIC ROUTES
 // ---------------------
-Route::post('/login', function () {
-    return response()->json(['message' => 'Login works']);
-});
-
-Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/logout', function () {
-        return response()->json(['message' => 'Logout works']);
-    });
-    Route::get('/me', function () {
-        return response()->json(['message' => 'Me works']);
-    });
-});
-
-// ---------------------
-// INVENTORY
-// ---------------------
-Route::get('/inventory', [InventoryController::class, 'index']);
-Route::post('/inventory', [InventoryController::class, 'store']);
-Route::put('/inventory/{inventory}', [InventoryController::class, 'update']); // modal edit
-Route::delete('/inventory/{inventory}', [InventoryController::class, 'destroy']);
-
-// ---------------------
-// PATIENTS
-// ---------------------
-Route::get('/patients', [PatientController::class, 'index']);
-Route::post('/patients', [PatientController::class, 'store']);
-Route::put('/patients/{patient}', [PatientController::class, 'update']);
-Route::delete('/patients/{patient}', [PatientController::class, 'destroy']);
-
-// ---------------------
-// PROFILE
-// ---------------------
-Route::get('/profile', [ProfileController::class, 'show']);
-Route::put('/profile', [ProfileController::class, 'update']);
-
-// ---------------------
-// SETTINGS
-// ---------------------
-Route::get('/settings', [SettingController::class, 'index']);
-Route::put('/settings', [SettingController::class, 'update']);
-
-// ---------------------
-// API RESOURCES
-// ---------------------
-Route::apiResource('appointments', AppointmentController::class);
-Route::apiResource('invoices', InvoiceController::class);
-Route::apiResource('services', ServiceController::class);
-Route::apiResource('users', UserController::class);
-
-// ---------------------
-// STATUS CHECK
-// ---------------------
+Route::post('/login', [AuthController::class, 'login']);
 Route::get('/status', function () {
     return response()->json([
         'status' => 'success',
-        'message' => 'AutoVet Laravel API is up and running!',
+        'message' => 'AutoVet API is running!',
         'timestamp' => now()->toIso8601String(),
     ]);
+});
+
+// ---------------------
+// PROTECTED ROUTES
+// ---------------------
+Route::middleware('auth:sanctum')->group(function () {
+    // Auth
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/me', [AuthController::class, 'me']);
+
+    // Inventory
+    Route::get('/inventory', [InventoryController::class, 'index']);
+    Route::post('/inventory', [InventoryController::class, 'store']);
+    Route::put('/inventory/{inventory}', [InventoryController::class, 'update']);
+    Route::delete('/inventory/{inventory}', [InventoryController::class, 'destroy']);
+
+    // Patients
+    Route::get('/patients', [PatientController::class, 'index']);
+    Route::post('/patients', [PatientController::class, 'store']);
+    Route::put('/patients/{patient}', [PatientController::class, 'update']);
+    Route::delete('/patients/{patient}', [PatientController::class, 'destroy']);
+
+    // Profile
+    Route::get('/profile', [ProfileController::class, 'show']);
+    Route::put('/profile', [ProfileController::class, 'update']);
+
+    // Settings
+    Route::get('/settings', [SettingController::class, 'index']);
+    Route::put('/settings', [SettingController::class, 'update']);
+
+    // API Resources
+    Route::apiResource('appointments', AppointmentController::class);
+    Route::apiResource('invoices', InvoiceController::class);
+    Route::apiResource('services', ServiceController::class);
+    Route::apiResource('users', UserController::class);
 });
