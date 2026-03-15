@@ -1,4 +1,9 @@
 <?php
+dd('routes/api.php is being loaded');
+
+Route::get('/debug-route', function () {
+    return 'API FILE IS LOADED';
+});
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\{
