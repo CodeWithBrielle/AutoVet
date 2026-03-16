@@ -17,4 +17,9 @@ class Inventory extends Model
         'supplier',
         'expiration_date'
     ];
+
+    public function batches()
+    {
+        return $this->hasMany(InventoryBatch::class)->orderBy('expiration_date', 'asc');
+    }
 }

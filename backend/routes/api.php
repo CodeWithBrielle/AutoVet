@@ -11,6 +11,8 @@ use App\Http\Controllers\SettingController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\ServiceController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\InventoryBatchController;
+use App\Http\Controllers\LowStockReportController;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
@@ -21,8 +23,18 @@ Route::get('/profile', [ProfileController::class, 'show']);
 Route::put('/profile', [ProfileController::class, 'update']);
 
 Route::get('/inventory', [InventoryController::class, 'index']);
+Route::get('/inventory/low-stock', [InventoryController::class, 'lowStock']);
 Route::post('/inventory', [InventoryController::class, 'store']);
 Route::delete('/inventory/{inventory}', [InventoryController::class, 'destroy']);
+
+// Reports
+Route::get('/reports/inventory/low-stock', [LowStockReportController::class, 'generate']);
+
+// Inventory Batches (FIFO / Expiry Tracking)
+Route::get('/inventory/batches/expiring-soon', [InventoryBatchController::class, 'expiringSoon']);
+Route::post('/inventory/batches/expire-old', [InventoryBatchController::class, 'expireOld']);
+Route::get('/inventory/{inventory}/batches', [InventoryBatchController::class, 'index']);
+Route::post('/inventory/{inventory}/batches', [InventoryBatchController::class, 'store']);
 
 Route::get('/patients', [PatientController::class, 'index']);
 Route::post('/patients', [PatientController::class, 'store']);
