@@ -46,8 +46,12 @@ Route::put('/settings', [SettingController::class, 'update']);
 
 Route::apiResource('appointments', AppointmentController::class);
 Route::apiResource('invoices', InvoiceController::class);
+Route::get('/invoices/{invoice}/pdf', [InvoiceController::class, 'exportPdf']);
 Route::apiResource('services', ServiceController::class);
 Route::apiResource('users', UserController::class);
+
+Route::get('/reports/dashboard', [\App\Http\Controllers\ReportController::class, 'dashboardStats']);
+Route::get('/reports/forecast', [\App\Http\Controllers\ReportController::class, 'salesForecast']);
 
 Route::get('/status', function () {
     return response()->json([

@@ -11,6 +11,7 @@ import {
 } from "react-icons/fi";
 import { LuPawPrint } from "react-icons/lu";
 import { useToast } from "../../context/ToastContext";
+import { apiFetch } from "../../utils/api-client";
 
 const quickAdds = ["+ Consultation", "+ Rabies Vax", "+ Nail Trim"];
 
@@ -60,9 +61,9 @@ function BillingInvoiceView() {
   useEffect(() => {
     // Fetch patients and settings on mount
     Promise.all([
-      fetch("/api/patients").then(res => res.json()),
-      fetch("/api/settings").then(res => res.json()),
-      fetch("/api/services").then(res => res.json()).catch(() => [])
+      apiFetch("/api/patients").then(res => res.json()),
+      apiFetch("/api/settings").then(res => res.json()),
+      apiFetch("/api/services").then(res => res.json()).catch(() => [])
     ])
       .then(([patientsData, settingsData, servicesData]) => {
         setPatients(patientsData);
@@ -116,6 +117,7 @@ function BillingInvoiceView() {
 
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [createdInvoiceId, setCreatedInvoiceId] = useState(null);
 
   const [serviceInput, setServiceInput] = useState("");
   const [qtyInput, setQtyInput] = useState(1);
@@ -192,6 +194,7 @@ function BillingInvoiceView() {
     setStatus("Draft");
     setAmountPaid(0);
     setPaymentMethod("");
+    setCreatedInvoiceId(null);
   };
 
   const submitInvoice = async (finalStatus) => {
@@ -235,16 +238,29 @@ function BillingInvoiceView() {
     };
 
     try {
-      const response = await fetch("/api/invoices", {
+      const response = await apiFetch("/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Accept": "application/json" },
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) {
+      if (!response.ok && response.status !== 202) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to save invoice");
       }
+
+      if (response.status === 202) {
+         toast.info("Offline mode: The invoice has been saved locally and queued for sync.");
+         if (finalStatus !== "Draft") {
+             setStatus(actualStatus);
+         } else {
+             resetForm();
+         }
+         return; // Skip waiting for ID since the real ID doesn't exist yet
+      }
+
+      const savedData = await response.json();
+      setCreatedInvoiceId(savedData.id);
 
       toast.success(`Invoice ${finalStatus === "Draft" ? "saved as draft" : "finalized"} successfully.`);
 
@@ -257,6 +273,14 @@ function BillingInvoiceView() {
       toast.error(err.message || "Failed to save invoice");
       console.error(err);
     }
+  };
+
+  const handleDownloadPdf = () => {
+      if (status === 'Draft' || !createdInvoiceId) {
+          toast.error("Please finalize the invoice first to download the PDF.");
+          return;
+      }
+      window.open(`/api/invoices/${createdInvoiceId}/pdf`, "_blank");
   };
 
   return (
@@ -482,13 +506,13 @@ function BillingInvoiceView() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => toast.info("Printing invoice...")}
+                onClick={handleDownloadPdf}
                 className="rounded-lg p-2 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-dark-surface dark:bg-zinc-950"
               >
                 <FiPrinter className="h-4 w-4" />
               </button>
               <button
-                onClick={() => toast.info("Downloading PDF...")}
+                onClick={handleDownloadPdf}
                 className="rounded-lg p-2 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-dark-surface dark:bg-zinc-950"
               >
                 <FiDownload className="h-4 w-4" />

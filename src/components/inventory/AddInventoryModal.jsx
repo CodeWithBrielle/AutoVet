@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
+import { apiFetch } from "../../utils/api-client";
 
 const STATUS_OPTIONS = ["In Stock", "Low Stock", "Expiring"];
 
@@ -27,7 +28,7 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
 
     useEffect(() => {
         if (isOpen) {
-            fetch("/api/settings")
+            apiFetch("/api/settings")
                 .then(res => res.json())
                 .then(data => {
                     if (data.inventory_categories) setCategoryOptions(JSON.parse(data.inventory_categories));
@@ -61,7 +62,7 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
 
     const onSubmit = async (data) => {
         try {
-            const response = await fetch("/api/inventory", {
+            const response = await apiFetch("/api/inventory", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -70,7 +71,7 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
                 body: JSON.stringify(data),
             });
 
-            if (!response.ok) {
+            if (!response.ok && response.status !== 202) {
                 const err = await response.json();
                 if (err.errors) {
                     throw new Error(Object.values(err.errors)[0][0]);
@@ -78,9 +79,20 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
                 throw new Error(err.message || "Failed to save inventory item.");
             }
 
-            const savedItem = await response.json();
-            onSave(savedItem);
-            toast.success("Inventory item added successfully!");
+            if (response.status === 202) {
+               // Offline mock object for optimistic UI
+               const mockSavedItem = {
+                   id: `offline-${Date.now()}`,
+                   ...data,
+                   created_at: new Date().toISOString()
+               };
+               onSave(mockSavedItem);
+               toast.info("Offline mode: The new item has been queued for sync.");
+            } else {
+               const savedItem = await response.json();
+               onSave(savedItem);
+               toast.success("Inventory item added successfully!");
+            }
 
             reset();
             onClose();

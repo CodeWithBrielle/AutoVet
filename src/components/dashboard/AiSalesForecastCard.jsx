@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FiCircle } from "react-icons/fi";
 import { LuSparkles } from "react-icons/lu";
 import clsx from "clsx";
+import { apiFetch } from "../../utils/api-client";
 
 const WIDTH = 760;
 const HEIGHT = 320;
@@ -27,27 +28,43 @@ const mockSalesData = [
 
 function AiSalesForecastCard() {
     const [activeRange, setActiveRange] = useState("6 Months");
-    const data = mockSalesData;
+    const [data, setData] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
 
-    const allValues = data.flatMap((entry) => [entry.actual, entry.forecast]).filter((value) => value !== null);
-    const min = Math.min(...allValues) * 0.9;
-    const max = Math.max(...allValues) * 1.1;
+    useEffect(() => {
+        setIsLoading(true);
+        apiFetch('/api/reports/forecast')
+            .then(res => res.json())
+            .then(resData => {
+                if (resData.status === 'success') {
+                    setData(resData.data);
+                }
+            })
+            .catch(console.error)
+            .finally(() => setIsLoading(false));
+    }, []);
+
+    const displayData = data.length > 0 ? data : mockSalesData;
+
+    const allValues = displayData.flatMap((entry) => [entry.actual, entry.forecast]).filter((value) => value !== null);
+    const min = Math.min(...(allValues.length ? allValues : [0])) * 0.9;
+    const max = Math.max(...(allValues.length ? allValues : [100])) * 1.1;
     const span = Math.max(max - min, 1);
 
-    const xStep = (WIDTH - PADDING_X * 2) / (data.length - 1);
+    const xStep = (WIDTH - PADDING_X * 2) / Math.max(displayData.length - 1, 1);
     const toY = (value) => HEIGHT - PADDING_Y - ((value - min) / span) * (HEIGHT - PADDING_Y * 2);
 
-    const forecastPoints = data.map((entry, index) => ({
+    const forecastPoints = displayData.map((entry, index) => ({
         x: PADDING_X + xStep * index,
         y: toY(entry.forecast),
     }));
 
-    const actualPoints = data
+    const actualPoints = displayData
         .map((entry, index) => (entry.actual === null ? null : { x: PADDING_X + xStep * index, y: toY(entry.actual) }))
         .filter(Boolean);
 
     const latestActualPoint = actualPoints[actualPoints.length - 1];
-    const latestActualValue = data.filter((entry) => entry.actual !== null).at(-1)?.actual;
+    const latestActualValue = displayData.filter((entry) => entry.actual !== null).at(-1)?.actual;
 
     const currency = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 }).format(val);
 
@@ -134,9 +151,13 @@ function AiSalesForecastCard() {
             </div>
 
             <div className="mt-4 grid grid-cols-7 gap-3 text-center text-sm font-medium text-slate-500 dark:text-zinc-400 relative z-10">
-                {data.map((entry) => (
-                    <span key={entry.month}>{entry.month}</span>
-                ))}
+                {isLoading ? (
+                    <span className="col-span-7">Loading forecast data...</span>
+                ) : (
+                    displayData.map((entry, index) => (
+                        <span key={index}>{entry.month}</span>
+                    ))
+                )}
             </div>
         </section>
     );

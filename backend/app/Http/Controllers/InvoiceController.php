@@ -19,6 +19,15 @@ class InvoiceController extends Controller
     }
 
     /**
+     * Export Invoice as PDF.
+     */
+    public function exportPdf(Invoice $invoice) {
+        $invoice->load(['patient', 'items']);
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.invoice', compact('invoice'));
+        return $pdf->download("invoice-{$invoice->invoice_number}.pdf");
+    }
+
+    /**
      * Store a newly created invoice.
      */
     public function store(Request $request)

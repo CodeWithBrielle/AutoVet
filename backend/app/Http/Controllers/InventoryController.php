@@ -38,6 +38,29 @@ class InventoryController extends Controller
         return response()->json($item, 201);
     }
 
+    public function update(Request $request, Inventory $inventory)
+    {
+        $validatedData = $request->validate([
+            'item_name' => 'required|string|max:255',
+            'sub_details' => 'nullable|string|max:255',
+            'category' => 'required|string|max:255',
+            'sku' => 'required|string|max:255|unique:inventories,sku,' . $inventory->id,
+            'stock_level' => 'required|integer|min:0',
+            'status' => 'required|string|max:255',
+            'price' => 'nullable|numeric|min:0',
+            'supplier' => 'nullable|string|max:255',
+            'expiration_date' => 'nullable|date',
+        ]);
+
+        $inventory->update($validatedData);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Inventory item updated successfully.',
+            'data' => $inventory
+        ]);
+    }
+
     public function destroy(Inventory $inventory)
     {
         $inventory->delete();

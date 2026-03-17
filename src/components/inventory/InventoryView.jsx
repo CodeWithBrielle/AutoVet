@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import { useState, useEffect } from "react";
 import { useToast } from "../../context/ToastContext";
+import { apiFetch } from "../../utils/api-client";
 import {
   FiAlertTriangle,
   FiBarChart2,
@@ -63,7 +64,7 @@ function InventoryView() {
   useEffect(() => {
     const fetchInventory = async () => {
       try {
-        const response = await fetch("/api/inventory");
+        const response = await apiFetch("/api/inventory");
         if (response.ok) {
           const data = await response.json();
           setInventoryRows(data);
@@ -74,7 +75,13 @@ function InventoryView() {
         setIsLoading(false);
       }
     };
+
     fetchInventory();
+    
+    // Listen for outbox sync events to refresh
+    const handleSync = () => fetchInventory();
+    window.addEventListener('outbox-synced', handleSync);
+    return () => window.removeEventListener('outbox-synced', handleSync);
   }, []);
 
   const handleSaveNewItem = (newItem) => {
@@ -88,12 +95,16 @@ function InventoryView() {
     if (!window.confirm(`Are you sure you want to delete ${product.item_name}?`)) return;
 
     try {
-      const response = await fetch(`/api/inventory/${product.id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Failed to delete product.");
+      const response = await apiFetch(`/api/inventory/${product.id}`, { method: "DELETE" });
+      if (!response.ok && response.status !== 202) throw new Error("Failed to delete product.");
 
       setInventoryRows((prev) => prev.filter((item) => item.id !== product.id));
       setViewedProduct(null);
-      toast.success(`${product.item_name} deleted successfully.`);
+      if (response.status === 202) {
+          toast.info("Offline mode: The item deletion has been queued.");
+      } else {
+          toast.success(`${product.item_name} deleted successfully.`);
+      }
     } catch (err) {
       toast.error(err.message || "An error occurred while deleting.");
     }
