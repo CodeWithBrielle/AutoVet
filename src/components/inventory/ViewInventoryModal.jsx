@@ -11,11 +11,41 @@ const statusStyles = {
 export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteRequest }) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({});
+<<<<<<< Updated upstream
+=======
+  const [categoryOptions, setCategoryOptions] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [isLoadingTx, setIsLoadingTx] = useState(false);
+>>>>>>> Stashed changes
 
   useEffect(() => {
     if (isOpen && product) {
       setFormData(product);
       setIsEditing(false);
+<<<<<<< Updated upstream
+=======
+      
+      // Fetch category options
+      fetch("/api/inventory-categories")
+        .then(res => res.json())
+        .then(data => {
+            setCategoryOptions(data.filter(c => c.status === "Active"));
+        })
+        .catch(console.error);
+
+      // Fetch transaction history
+      setIsLoadingTx(true);
+      fetch(`/api/inventory/${product.id}/transactions`)
+        .then(res => res.json())
+        .then(data => {
+            setTransactions(data);
+            setIsLoadingTx(false);
+        })
+        .catch(err => {
+            console.error(err);
+            setIsLoadingTx(false);
+        });
+>>>>>>> Stashed changes
     }
   }, [isOpen, product]);
 
@@ -106,7 +136,7 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
 
           <div className="mb-6 grid grid-cols-2 gap-y-4">
             {[
-              ["Category", "category"],
+              ["Category", "category_id"],
               ["SKU", "sku"],
               ["Stock Level", "stock_level"],
               ["Price", "price"],
@@ -116,6 +146,7 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
               <div key={field}>
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-500">{label}</p>
                 {isEditing ? (
+<<<<<<< Updated upstream
                   <input
                     type={field === "price" || field === "stock_level" ? "number" : "text"}
                     className={inputClass}
@@ -123,11 +154,55 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
                     onChange={(e) => handleChange(field, e.target.value)}
                   />
                 ) : field === "price" ? (
+=======
+                  field === "category_id" ? (
+                    <select
+                      className={inputClass}
+                      value={formData[field] || ""}
+                      onChange={(e) => handleChange(field, e.target.value)}
+                    >
+                      <option value="">Select Category</option>
+                      {categoryOptions.map((cat) => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ))}
+                    </select>
+                  ) : field === "sku" ? (
+                    <input
+                      type="text"
+                      readOnly
+                      className={clsx(inputClass, "bg-slate-50 dark:bg-dark-surface/50 cursor-not-allowed opacity-70")}
+                      value={formData[field] ?? ""}
+                    />
+                  ) : (
+                    <input
+                      type={
+                        field === "price" || field === "stock_level" || field === "min_stock_level" 
+                          ? "number" 
+                          : field === "expiration_date" 
+                            ? "date" 
+                            : "text"
+                      }
+                      className={inputClass}
+                      value={formData[field] ?? ""}
+                      onChange={(e) => handleChange(field, e.target.value)}
+                    />
+                  )
+                ) : (field === "price" || field === "selling_price") ? (
+>>>>>>> Stashed changes
                   <p className="font-semibold text-slate-800 dark:text-zinc-200">
                     ₱{Number(product.price).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
+<<<<<<< Updated upstream
                 ) : field === "stock_level" ? (
                   <p className="font-semibold text-slate-800 dark:text-zinc-200">{Number(product.stock_level).toLocaleString()} units</p>
+=======
+                ) : (field === "stock_level" || field === "min_stock_level") ? (
+                  <p className="font-semibold text-slate-800 dark:text-zinc-200">{Number(product[field] || 0).toLocaleString()} units</p>
+                ) : (field === "category_id") ? (
+                  <p className="font-semibold text-slate-800 dark:text-zinc-200">
+                    {categoryOptions.find(c => c.id === product.category_id)?.name || product.category || "N/A"}
+                  </p>
+>>>>>>> Stashed changes
                 ) : (
                   <p className="font-semibold text-slate-800 dark:text-zinc-200">{product[field] || "N/A"}</p>
                 )}

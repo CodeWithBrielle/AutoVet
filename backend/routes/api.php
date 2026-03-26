@@ -37,6 +37,19 @@ Route::apiResource('invoices', InvoiceController::class);
 Route::apiResource('services', ServiceController::class);
 Route::apiResource('users', UserController::class);
 
+<<<<<<< Updated upstream
+=======
+Route::apiResource('species', \App\Http\Controllers\SpeciesController::class);
+Route::apiResource('breeds', \App\Http\Controllers\BreedController::class);
+Route::apiResource('owners', \App\Http\Controllers\OwnerController::class);
+Route::apiResource('pets', \App\Http\Controllers\PetController::class);
+Route::apiResource('vet-schedules', \App\Http\Controllers\VetScheduleController::class);
+Route::apiResource('medical-records', \App\Http\Controllers\MedicalRecordController::class);
+Route::apiResource('inventory-categories', \App\Http\Controllers\InventoryCategoryController::class);
+Route::apiResource('service-categories', \App\Http\Controllers\ServiceCategoryController::class);
+Route::post('/login', [AuthController::class, 'login']);
+
+>>>>>>> Stashed changes
 Route::get('/status', function () {
     return response()->json([
         'status' => 'success',

@@ -11,7 +11,7 @@ export default function ServiceManagementTab() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingService, setEditingService] = useState(null);
 
-  const [formData, setFormData] = useState({ name: "", description: "", price: 0, category: "", status: "Active" });
+  const [formData, setFormData] = useState({ name: "", description: "", price: 0, category_id: "", status: "Active" });
 
   const fetchServices = () => {
     setLoading(true);
@@ -23,14 +23,10 @@ export default function ServiceManagementTab() {
 
   useEffect(() => {
     fetchServices();
-    fetch("/api/settings")
+    fetch("/api/service-categories")
       .then(res => res.json())
       .then(data => {
-        try {
-          setServiceCategories(data.service_categories ? JSON.parse(data.service_categories) : []);
-        } catch {
-          setServiceCategories([]);
-        }
+        setServiceCategories(data.filter(c => c.status === "Active"));
       })
       .catch(console.error);
   }, []);
@@ -38,10 +34,10 @@ export default function ServiceManagementTab() {
   const handleOpenModal = (service = null) => {
     if (service) {
       setEditingService(service);
-      setFormData({ name: service.name, description: service.description || "", price: service.price, category: service.category || "", status: service.status });
+      setFormData({ name: service.name, description: service.description || "", price: service.price, category_id: service.category_id || "", status: service.status });
     } else {
       setEditingService(null);
-      setFormData({ name: "", description: "", price: 0, category: "", status: "Active" });
+      setFormData({ name: "", description: "", price: 0, category_id: serviceCategories[0]?.id || "", status: "Active" });
     }
     setIsModalOpen(true);
   };
@@ -176,11 +172,10 @@ export default function ServiceManagementTab() {
                   <input required min="0" step="0.01" type="number" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Category</label>
-                  <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white">
+                  <select value={formData.category_id} onChange={e => setFormData({...formData, category_id: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white">
                     <option value="">Select Category</option>
                     {serviceCategories.map(c => (
-                      <option key={c} value={c}>{c}</option>
+                      <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </div>

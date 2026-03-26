@@ -11,8 +11,13 @@ const STATUS_OPTIONS = ["In Stock", "Low Stock", "Expiring"];
 const inventorySchema = z.object({
     item_name: z.string().min(1, "Item name is required").max(255),
     sub_details: z.string().max(255).optional(),
+<<<<<<< Updated upstream
     category: z.string().min(1, "Category is required").max(255),
     sku: z.string().min(1, "SKU is required").max(255),
+=======
+    category_id: z.coerce.number().min(1, "Category is required"),
+    sku: z.string().max(255).optional(),
+>>>>>>> Stashed changes
     stock_level: z.coerce.number().min(0, "Stock must be 0 or more"),
     status: z.string().min(1, "Status is required").max(255),
     price: z.coerce.number().min(0, "Price must be 0 or more").optional().or(z.literal("")),
@@ -22,15 +27,22 @@ const inventorySchema = z.object({
 
 export default function AddInventoryModal({ isOpen, onClose, onSave }) {
     const toast = useToast();
+<<<<<<< Updated upstream
     const [categoryOptions, setCategoryOptions] = useState(["Vaccines", "Antibiotics", "Supplies", "Diagnostics"]);
     const [priceDisplay, setPriceDisplay] = useState("");
+=======
+    const [categoryOptions, setCategoryOptions] = useState([]);
+    const [costPriceDisplay, setCostPriceDisplay] = useState("");
+    const [sellingPriceDisplay, setSellingPriceDisplay] = useState("");
+>>>>>>> Stashed changes
 
     useEffect(() => {
         if (isOpen) {
-            fetch("/api/settings")
+            fetch("/api/inventory-categories")
                 .then(res => res.json())
                 .then(data => {
-                    if (data.inventory_categories) setCategoryOptions(JSON.parse(data.inventory_categories));
+                    setCategoryOptions(data.filter(c => c.status === "Active"));
+                    if (data.length > 0) setValue("category_id", data[0].id);
                 })
                 .catch(console.error);
         }
@@ -47,7 +59,11 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
         defaultValues: {
             item_name: "",
             sub_details: "",
+<<<<<<< Updated upstream
             category: "Vaccines",
+=======
+            category_id: "",
+>>>>>>> Stashed changes
             sku: "",
             stock_level: 0,
             status: "In Stock",
@@ -114,15 +130,16 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
             <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
               Category *
             </label>
-            <select {...register("category")} className={getInputClass(errors.category)}>
+            <select {...register("category_id")} className={getInputClass(errors.category_id)}>
+              <option value="">Select Category</option>
               {categoryOptions.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
                 </option>
               ))}
             </select>
-            {errors.category && (
-              <p className="mt-1 text-sm text-red-500">{errors.category.message}</p>
+            {errors.category_id && (
+              <p className="mt-1 text-sm text-red-500">{errors.category_id.message}</p>
             )}
           </div>
 

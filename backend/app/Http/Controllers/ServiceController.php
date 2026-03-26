@@ -17,9 +17,12 @@ class ServiceController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'price' => 'nullable|numeric|min:0',
-            'category' => 'nullable|string|max:255',
+            'category_id' => 'required|exists:service_categories,id',
             'status' => 'nullable|string|in:Active,Inactive',
         ]);
+
+        $category = \App\Models\ServiceCategory::find($validated['category_id']);
+        $validated['category'] = $category->name;
 
         $service = \App\Models\Service::create($validated);
         return response()->json($service, 201);
@@ -39,10 +42,13 @@ class ServiceController extends Controller
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'price' => 'nullable|numeric|min:0',
-            'category' => 'nullable|string|max:255',
+            'category_id' => 'required|exists:service_categories,id',
             'status' => 'nullable|string|in:Active,Inactive',
         ]);
 
+        $category = \App\Models\ServiceCategory::find($validated['category_id']);
+        $validated['category'] = $category->name;
+        
         $service->update($validated);
         return response()->json($service);
     }
