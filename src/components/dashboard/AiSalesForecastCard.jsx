@@ -22,41 +22,68 @@ function AiSalesForecastCard() {
 
     useEffect(() => {
         setIsLoading(true);
+
         fetch(`/api/dashboard/sales-forecast?range=${activeRange}`)
-            .then(res => res.json())
-            .then(fetchedData => {
-                setData(fetchedData);
+            .then(async (res) => {
+                const json = await res.json();
+
+                if (!res.ok) {
+                    console.error("Sales forecast API error:", json);
+                    return [];
+                }
+
+                return Array.isArray(json)
+                    ? json
+                    : Array.isArray(json?.data)
+                        ? json.data
+                        : [];
+            })
+            .then((normalizedData) => {
+                setData(normalizedData);
                 setIsLoading(false);
             })
-            .catch(err => {
+            .catch((err) => {
                 console.error("Failed to fetch forecast:", err);
+                setData([]);
                 setIsLoading(false);
             });
     }, [activeRange]);
 
-    const allValues = data.flatMap((entry) => [entry.actual, entry.forecast]).filter((value) => value !== null);
-    
-    // To avoid NaN when data is empty
+    const safeData = Array.isArray(data) ? data : [];
+
+    const allValues = safeData
+        .flatMap((entry) => [entry.actual, entry.forecast])
+        .filter((value) => value !== null && value !== undefined);
+
     const min = allValues.length ? Math.min(...allValues) * 0.9 : 0;
     const max = allValues.length ? Math.max(...allValues) * 1.1 : 100;
     const span = Math.max(max - min, 1);
 
-    const xStep = data.length > 1 ? (WIDTH - PADDING_X * 2) / (data.length - 1) : 0;
+    const xStep = safeData.length > 1 ? (WIDTH - PADDING_X * 2) / (safeData.length - 1) : 0;
     const toY = (value) => HEIGHT - PADDING_Y - ((value - min) / span) * (HEIGHT - PADDING_Y * 2);
 
-    const forecastPoints = data.map((entry, index) => ({
+    const forecastPoints = safeData.map((entry, index) => ({
         x: PADDING_X + xStep * index,
-        y: toY(entry.forecast),
+        y: toY(entry.forecast ?? min),
     }));
 
-    const actualPoints = data
-        .map((entry, index) => (entry.actual === null ? null : { x: PADDING_X + xStep * index, y: toY(entry.actual) }))
+    const actualPoints = safeData
+        .map((entry, index) =>
+            entry.actual === null || entry.actual === undefined
+                ? null
+                : { x: PADDING_X + xStep * index, y: toY(entry.actual) }
+        )
         .filter(Boolean);
 
     const latestActualPoint = actualPoints.length > 0 ? actualPoints[actualPoints.length - 1] : null;
-    const latestActualValue = data.filter((entry) => entry.actual !== null).at(-1)?.actual;
+    const latestActualValue = safeData.filter((entry) => entry.actual !== null && entry.actual !== undefined).at(-1)?.actual;
 
-    const currency = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 }).format(val);
+    const currency = (val) =>
+        new Intl.NumberFormat("en-PH", {
+            style: "currency",
+            currency: "PHP",
+            maximumFractionDigits: 0,
+        }).format(val ?? 0);
 
     return (
         <section className="card-shell p-6 relative overflow-hidden">
@@ -70,8 +97,11 @@ function AiSalesForecastCard() {
                         <LuSparkles className="text-emerald-500 w-6 h-6" />
                         AI Sales Forecast
                     </h3>
-                    <p className="mt-1 text-base text-slate-500 dark:text-zinc-400">Projected revenue based on historical clinic data and seasonal trends.</p>
+                    <p className="mt-1 text-base text-slate-500 dark:text-zinc-400">
+                        Projected revenue based on historical clinic data and seasonal trends.
+                    </p>
                 </div>
+
                 <div className="flex items-center gap-2 rounded-xl bg-slate-100 p-1 dark:bg-dark-surface">
                     <button
                         onClick={() => setActiveRange("6 Months")}
@@ -84,6 +114,7 @@ function AiSalesForecastCard() {
                     >
                         6 Months
                     </button>
+
                     <button
                         onClick={() => setActiveRange("Year")}
                         className={clsx(
@@ -112,7 +143,15 @@ function AiSalesForecastCard() {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-dark-border dark:bg-dark-surface relative z-10">
                 {isLoading ? (
                     <div className="h-[330px] w-full flex items-center justify-center">
-                        <div className="text-slate-500 dark:text-zinc-400 font-medium">Loading AI Forecast...</div>
+                        <div className="text-slate-500 dark:text-zinc-400 font-medium">
+                            Loading AI Forecast...
+                        </div>
+                    </div>
+                ) : safeData.length === 0 ? (
+                    <div className="h-[330px] w-full flex items-center justify-center">
+                        <div className="text-slate-500 dark:text-zinc-400 font-medium">
+                            No forecast data available.
+                        </div>
                     </div>
                 ) : (
                     <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-[330px] w-full">
@@ -128,15 +167,41 @@ function AiSalesForecastCard() {
                             />
                         ))}
 
-                        <path d={createPath(forecastPoints)} className="fill-none stroke-slate-400 dark:stroke-zinc-500" strokeWidth="2.5" strokeDasharray="8 8" />
-                        <path d={createPath(actualPoints)} className="fill-none stroke-emerald-500" strokeWidth="4" strokeLinecap="round" />
+                        <path
+                            d={createPath(forecastPoints)}
+                            className="fill-none stroke-slate-400 dark:stroke-zinc-500"
+                            strokeWidth="2.5"
+                            strokeDasharray="8 8"
+                        />
+
+                        <path
+                            d={createPath(actualPoints)}
+                            className="fill-none stroke-emerald-500"
+                            strokeWidth="4"
+                            strokeLinecap="round"
+                        />
 
                         {latestActualPoint ? (
                             <>
-                                <circle cx={latestActualPoint.x} cy={latestActualPoint.y} r="6" className="fill-emerald-500" />
+                                <circle
+                                    cx={latestActualPoint.x}
+                                    cy={latestActualPoint.y}
+                                    r="6"
+                                    className="fill-emerald-500"
+                                />
                                 <g transform={`translate(${latestActualPoint.x - 45}, ${latestActualPoint.y - 52})`}>
-                                    <rect width="90" height="36" rx="8" className="fill-zinc-800 dark:fill-zinc-700" />
-                                    <text x="45" y="23" textAnchor="middle" className="fill-white text-sm font-semibold">
+                                    <rect
+                                        width="90"
+                                        height="36"
+                                        rx="8"
+                                        className="fill-zinc-800 dark:fill-zinc-700"
+                                    />
+                                    <text
+                                        x="45"
+                                        y="23"
+                                        textAnchor="middle"
+                                        className="fill-white text-sm font-semibold"
+                                    >
                                         {currency(latestActualValue)}
                                     </text>
                                 </g>
@@ -146,10 +211,15 @@ function AiSalesForecastCard() {
                 )}
             </div>
 
-            <div className="mt-4 grid grid-cols-7 gap-3 text-center text-sm font-medium text-slate-500 dark:text-zinc-400 relative z-10" style={{ gridTemplateColumns: `repeat(${data.length || 7}, minmax(0, 1fr))` }}>
-                {data.map((entry, i) => (
-                    <span key={i}>{entry.month}</span>
-                ))}
+            <div
+                className="mt-4 grid gap-3 text-center text-sm font-medium text-slate-500 dark:text-zinc-400 relative z-10"
+                style={{ gridTemplateColumns: `repeat(${safeData.length || 7}, minmax(0, 1fr))` }}
+            >
+                {safeData.length > 0 ? (
+                    safeData.map((entry, i) => <span key={i}>{entry.month}</span>)
+                ) : (
+                    Array.from({ length: 7 }).map((_, i) => <span key={i}>-</span>)
+                )}
             </div>
         </section>
     );

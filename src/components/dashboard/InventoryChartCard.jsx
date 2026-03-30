@@ -21,14 +21,38 @@ function InventoryChartCard() {
 
   useEffect(() => {
     setIsLoading(true);
-    fetch(`/api/dashboard/inventory-consumption?range=${activeRange}`)
-      .then(res => res.json())
-      .then(fetchedData => {
-        setData(fetchedData);
+
+    const token = localStorage.getItem("auth_token");
+
+    fetch(`/api/dashboard/inventory-consumption?range=${activeRange}`, {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+        Accept: "application/json",
+      },
+    })
+      .then(async (res) => {
+        const json = await res.json();
+
+        if (!res.ok) {
+          // Unauthenticated, forbidden, or a server error — log and return empty
+          console.error("[InventoryChartCard] API error:", json);
+          return [];
+        }
+
+        // Defensive normalization: handle array, { data: [] }, or anything else
+        if (Array.isArray(json)) return json;
+        if (Array.isArray(json?.data)) return json.data;
+
+        console.warn("[InventoryChartCard] Unexpected API response shape:", json);
+        return [];
+      })
+      .then((normalizedData) => {
+        setData(normalizedData);
         setIsLoading(false);
       })
-      .catch(err => {
-        console.error("Failed to fetch inventory data:", err);
+      .catch((err) => {
+        console.error("[InventoryChartCard] Fetch failed:", err);
+        setData([]);
         setIsLoading(false);
       });
   }, [activeRange]);
@@ -41,40 +65,56 @@ function InventoryChartCard() {
     );
   }
 
-  if (!data || data.length === 0) {
+  // Defensive: guarantee safeData is always an array before any array operations
+  const safeData = Array.isArray(data) ? data : [];
+
+  if (safeData.length === 0) {
     return (
       <section className="card-shell flex min-h-[460px] items-center justify-center p-6 border-dashed border-2 dark:border-dark-border">
-        <span className="text-slate-400 dark:text-zinc-500">Awaiting Inventory Data from API...</span>
+        <span className="text-slate-400 dark:text-zinc-500">No inventory data available.</span>
       </section>
     );
   }
 
-  const allValues = data.flatMap((entry) => [entry.actual, entry.forecast]).filter((value) => value !== null);
+  const allValues = safeData
+    .flatMap((entry) => [entry.actual, entry.forecast])
+    .filter((value) => value !== null && value !== undefined);
+
   const min = allValues.length ? Math.min(...allValues) * 0.9 : 0;
   const max = allValues.length ? Math.max(...allValues) * 1.1 : 100;
   const span = Math.max(max - min, 1);
 
-  const xStep = data.length > 1 ? (WIDTH - PADDING_X * 2) / (data.length - 1) : 0;
+  const xStep = safeData.length > 1 ? (WIDTH - PADDING_X * 2) / (safeData.length - 1) : 0;
   const toY = (value) => HEIGHT - PADDING_Y - ((value - min) / span) * (HEIGHT - PADDING_Y * 2);
 
-  const forecastPoints = data.map((entry, index) => ({
+  const forecastPoints = safeData.map((entry, index) => ({
     x: PADDING_X + xStep * index,
-    y: toY(entry.forecast),
+    y: toY(entry.forecast ?? min),
   }));
 
-  const actualPoints = data
-    .map((entry, index) => (entry.actual === null ? null : { x: PADDING_X + xStep * index, y: toY(entry.actual) }))
+  const actualPoints = safeData
+    .map((entry, index) =>
+      entry.actual === null || entry.actual === undefined
+        ? null
+        : { x: PADDING_X + xStep * index, y: toY(entry.actual) }
+    )
     .filter(Boolean);
 
   const latestActualPoint = actualPoints.length > 0 ? actualPoints[actualPoints.length - 1] : null;
-  const latestActualValue = data.filter((entry) => entry.actual !== null).at(-1)?.actual;
+  const latestActualValue = safeData
+    .filter((entry) => entry.actual !== null && entry.actual !== undefined)
+    .at(-1)?.actual;
 
   return (
     <section className="card-shell p-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-zinc-50">Inventory Consumption</h3>
-          <p className="mt-1 text-base text-slate-500 dark:text-zinc-400">Actual usage compared with AutoVet prediction model.</p>
+          <h3 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-zinc-50">
+            Inventory Consumption
+          </h3>
+          <p className="mt-1 text-base text-slate-500 dark:text-zinc-400">
+            Actual usage compared with AutoVet prediction model.
+          </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-slate-100 p-1 dark:bg-dark-surface">
           <button
@@ -127,12 +167,27 @@ function InventoryChartCard() {
             />
           ))}
 
-          <path d={createPath(forecastPoints)} className="fill-none stroke-slate-400 dark:stroke-zinc-500" strokeWidth="2.5" strokeDasharray="8 8" />
-          <path d={createPath(actualPoints)} className="fill-none stroke-blue-500" strokeWidth="4" strokeLinecap="round" />
+          <path
+            d={createPath(forecastPoints)}
+            className="fill-none stroke-slate-400 dark:stroke-zinc-500"
+            strokeWidth="2.5"
+            strokeDasharray="8 8"
+          />
+          <path
+            d={createPath(actualPoints)}
+            className="fill-none stroke-blue-500"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
 
           {latestActualPoint ? (
             <>
-              <circle cx={latestActualPoint.x} cy={latestActualPoint.y} r="6" className="fill-blue-500" />
+              <circle
+                cx={latestActualPoint.x}
+                cy={latestActualPoint.y}
+                r="6"
+                className="fill-blue-500"
+              />
               <g transform={`translate(${latestActualPoint.x - 40}, ${latestActualPoint.y - 52})`}>
                 <rect width="88" height="36" rx="8" className="fill-zinc-800 dark:fill-zinc-700" />
                 <text x="44" y="23" textAnchor="middle" className="fill-white text-sm font-semibold">
@@ -144,8 +199,11 @@ function InventoryChartCard() {
         </svg>
       </div>
 
-      <div className="mt-4 grid grid-cols-4 gap-3 text-center text-sm font-medium text-slate-500 dark:text-zinc-400" style={{ gridTemplateColumns: `repeat(${data.length || 4}, minmax(0, 1fr))` }}>
-        {data.map((entry, i) => (
+      <div
+        className="mt-4 grid gap-3 text-center text-sm font-medium text-slate-500 dark:text-zinc-400"
+        style={{ gridTemplateColumns: `repeat(${safeData.length || 4}, minmax(0, 1fr))` }}
+      >
+        {safeData.map((entry, i) => (
           <span key={i}>{entry.month}</span>
         ))}
       </div>
