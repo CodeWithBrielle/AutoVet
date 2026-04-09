@@ -16,9 +16,8 @@ class ServiceController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'price' => 'nullable|numeric|min:0',
-            'pricing_type' => 'required|string|in:fixed,size_based,weight_based,custom_based',
-            'measurement_basis' => 'required|string|in:none,size,weight',
+            'pricing_type' => 'required|string|in:fixed,weight_based',
+            'measurement_basis' => 'required|string|in:none,weight',
             'professional_fee' => 'nullable|numeric|min:0',
             'category' => 'nullable|string|max:255',
             'status' => 'nullable|string|in:Active,Inactive',
@@ -26,8 +25,8 @@ class ServiceController extends Controller
             'auto_load_linked_items' => 'nullable|boolean',
             'allow_manual_item_override' => 'nullable|boolean',
             'pricing_rules' => 'nullable|array',
-            'pricing_rules.*.basis_type' => 'required|string|in:size,weight',
-            'pricing_rules.*.reference_id' => 'required|integer',
+            'pricing_rules.*.basis_type' => 'required|string|in:size',
+            'pricing_rules.*.reference_id' => 'required|integer|exists:pet_size_categories,id',
             'pricing_rules.*.price' => 'required|numeric|min:0',
             'linked_items' => [
                 'nullable',
@@ -39,6 +38,20 @@ class ServiceController extends Controller
                     ];
                     if (!empty($value) && !in_array($request->input('category'), $eligibleCategories)) {
                         $fail('Linked inventory items are only allowed for categories: ' . implode(', ', $eligibleCategories) . '.');
+                    }
+
+                    // Strict Price Validation
+                    foreach ($value as $item) {
+                        $inventory = \App\Models\Inventory::find($item['inventory_id']);
+                        if (!$inventory) continue;
+
+                        if (!($inventory->cost_price > 0)) {
+                            $fail("The linked item '{$inventory->item_name}' must have a valid cost price configured in inventory.");
+                        }
+
+                        if (!empty($item['is_billable']) && !($inventory->selling_price > 0)) {
+                            $fail("The linked item '{$inventory->item_name}' is marked as billable but has no selling price configured.");
+                        }
                     }
                 },
             ],
@@ -53,7 +66,10 @@ class ServiceController extends Controller
         $service = \App\Models\Service::create($validated);
 
         if (!empty($validated['pricing_rules'])) {
-            $service->pricingRules()->createMany($validated['pricing_rules']);
+            $uniqueRules = collect($validated['pricing_rules'])->unique(function ($rule) {
+                return $rule['basis_type'] . '-' . $rule['reference_id'];
+            })->values()->all();
+            $service->pricingRules()->createMany($uniqueRules);
         }
         if (!empty($validated['linked_items'])) {
             $service->consumables()->createMany($validated['linked_items']);
@@ -75,9 +91,8 @@ class ServiceController extends Controller
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
-            'price' => 'nullable|numeric|min:0',
-            'pricing_type' => 'nullable|string|in:fixed,size_based,weight_based,custom_based',
-            'measurement_basis' => 'nullable|string|in:none,size,weight',
+            'pricing_type' => 'nullable|string|in:fixed,weight_based',
+            'measurement_basis' => 'nullable|string|in:none,weight',
             'professional_fee' => 'nullable|numeric|min:0',
             'category' => 'nullable|string|max:255',
             'status' => 'nullable|string|in:Active,Inactive',
@@ -85,8 +100,8 @@ class ServiceController extends Controller
             'auto_load_linked_items' => 'nullable|boolean',
             'allow_manual_item_override' => 'nullable|boolean',
             'pricing_rules' => 'nullable|array',
-            'pricing_rules.*.basis_type' => 'required|string|in:size,weight',
-            'pricing_rules.*.reference_id' => 'required|integer',
+            'pricing_rules.*.basis_type' => 'required|string|in:size',
+            'pricing_rules.*.reference_id' => 'required|integer|exists:pet_size_categories,id',
             'pricing_rules.*.price' => 'required|numeric|min:0',
             'linked_items' => [
                 'nullable',
@@ -98,6 +113,20 @@ class ServiceController extends Controller
                     ];
                     if (!empty($value) && !in_array($request->input('category'), $eligibleCategories)) {
                         $fail('Linked inventory items are only allowed for categories: ' . implode(', ', $eligibleCategories) . '.');
+                    }
+
+                    // Strict Price Validation
+                    foreach ($value as $item) {
+                        $inventory = \App\Models\Inventory::find($item['inventory_id']);
+                        if (!$inventory) continue;
+
+                        if (!($inventory->cost_price > 0)) {
+                            $fail("The linked item '{$inventory->item_name}' must have a valid cost price configured in inventory.");
+                        }
+
+                        if (!empty($item['is_billable']) && !($inventory->selling_price > 0)) {
+                            $fail("The linked item '{$inventory->item_name}' is marked as billable but has no selling price configured.");
+                        }
                     }
                 },
             ],
@@ -113,7 +142,10 @@ class ServiceController extends Controller
 
         if (isset($validated['pricing_rules'])) {
             $service->pricingRules()->delete();
-            $service->pricingRules()->createMany($validated['pricing_rules']);
+            $uniqueRules = collect($validated['pricing_rules'])->unique(function ($rule) {
+                return $rule['basis_type'] . '-' . $rule['reference_id'];
+            })->values()->all();
+            $service->pricingRules()->createMany($uniqueRules);
         }
 
         if (isset($validated['linked_items'])) {

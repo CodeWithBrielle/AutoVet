@@ -327,7 +327,7 @@ function InventoryView() {
                       <td className="px-5 py-4">
                         <div className="flex flex-col">
                           <p className="text-sm text-slate-500 dark:text-zinc-500 line-through decoration-slate-300 font-medium">
-                            ₱{Number(row.price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                            ₱{Number(row.cost_price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
                           </p>
                           <p className="text-lg font-bold text-slate-900 dark:text-zinc-50">
                             ₱{Number(row.selling_price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
@@ -357,9 +357,19 @@ function InventoryView() {
                                </span>
                              );
                           })()}
-                          {row.is_billable && (
+                          {row.is_sellable && (
+                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-900/30 dark:bg-emerald-900/20 dark:text-emerald-400 whitespace-nowrap">
+                              Retail
+                            </span>
+                          )}
+                          {row.is_service_usable && (
                             <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:border-blue-900/30 dark:bg-blue-900/20 dark:text-blue-400 whitespace-nowrap">
-                              Billable
+                              Clinic
+                            </span>
+                          )}
+                          {row.is_sellable && row.is_service_usable && (
+                            <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-400 whitespace-nowrap">
+                              Dual
                             </span>
                           )}
                         </div>

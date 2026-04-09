@@ -102,7 +102,7 @@ export default function ServiceManagementTab() {
       })
       .catch(console.error);
 
-    fetch("/api/inventories", { headers })
+    fetch("/api/inventory", { headers })
       .then(res => res.json())
       .then(result => {
         const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
@@ -174,17 +174,31 @@ export default function ServiceManagementTab() {
       return;
     }
 
-    if ((formData.pricing_type === 'size_based' || formData.pricing_type === 'weight_based') && formData.pricing_rules.length === 0) {
-      toast.error(`${formData.pricing_type.replace('_', ' ')} requires at least one pricing rule.`);
+    if (formData.pricing_type === 'weight_based' && formData.pricing_rules.length === 0) {
+      toast.error("Weight Based requires at least one pricing rule.");
       return;
+    }
+
+    // Linked Items Price Validation
+    for (const li of formData.linked_items) {
+      const inv = inventories.find(i => i.id === Number(li.inventory_id));
+      if (!inv) continue;
+      
+      if (!(Number(inv.cost_price) > 0)) {
+        toast.error(`'${inv.item_name}' must have a valid cost price.`);
+        return;
+      }
+
+      if (li.is_billable && !(Number(inv.selling_price) > 0)) {
+        toast.error(`'${inv.item_name}' is billable but has no selling price.`);
+        return;
+      }
     }
 
     // Clean up pricing rules based on pricing_type
     let cleanedRules = [];
-    if (formData.pricing_type === 'size_based' || formData.pricing_type === 'weight_based') {
+    if (formData.pricing_type === 'weight_based') {
       cleanedRules = formData.pricing_rules.filter(r => r.basis_type === 'size');
-    } else if (formData.pricing_type === 'rule_based') {
-      cleanedRules = formData.pricing_rules.filter(r => r.basis_type === 'rule');
     }
 
     const payload = { 
@@ -262,7 +276,17 @@ export default function ServiceManagementTab() {
             {services.map((svc) => (
               <tr key={svc.id} className="border-b border-slate-200/80 dark:border-dark-border">
                 <td className="px-4 py-4">
-                  <p className="text-sm font-medium text-slate-900 dark:text-zinc-50">{svc.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-slate-900 dark:text-zinc-50">{svc.name}</p>
+                    {svc.consumables?.some(c => !(Number(c.inventory?.cost_price) > 0) || (c.is_billable && !(Number(c.inventory?.selling_price) > 0))) && (
+                      <div className="group relative">
+                        <span className="cursor-help text-rose-500 text-xs animate-pulse">⚠️</span>
+                        <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-48 p-2 bg-slate-900 text-white text-[10px] rounded shadow-xl z-10">
+                          This service contains linked items with missing or zero prices. Click Edit to fix.
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-500 dark:text-zinc-400 truncate max-w-[200px]">{svc.description}</p>
                 </td>
                 <td className="px-4 py-4 text-sm text-slate-700 dark:text-zinc-300">{svc.category || "-"}</td>
@@ -274,17 +298,41 @@ export default function ServiceManagementTab() {
                 <td className="px-4 py-4 text-sm font-semibold text-slate-900 dark:text-zinc-50">
                   {svc.pricing_type === 'fixed' ? (
                     `₱${Number(svc.professional_fee || svc.price || 0).toFixed(2)} Professional Fee`
-                  ) : svc.pricing_rules?.length > 0 ? (
-                    <span className="text-blue-600 dark:text-blue-400 text-xs font-bold bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
-                      {svc.pricing_rules.length} {
-                        svc.pricing_type === 'size_based' ? 'Size Rates' : 
-                        svc.pricing_type === 'weight_based' ? 'Weight Brackets' : 
-                        'Custom Rules'
-                      } Configured
-                    </span>
-                  ) : (
-                    <span className="text-rose-500 text-xs font-bold italic">No Pricing Rules Set</span>
-                  )}
+                  ) : (() => {
+                    const uniqueRules = svc.pricing_rules?.filter(r => r.basis_type === 'size') || [];
+                    const validCategoryIds = petSizes.map(ps => ps.id);
+                    const activeTiers = [...new Set(uniqueRules.map(r => r.reference_id))].filter(tid => validCategoryIds.includes(tid));
+                    const tierCount = activeTiers.length;
+                    
+                    // Generate Preview (e.g., 0-5kg, 5-10kg) for primary species (usually Dogs=Canine)
+                    // We assume Canine is ID 1 or the first species found in weightRanges
+                    const primarySpeciesId = weightRanges[0]?.species_id;
+                    const preview = activeTiers
+                      .map(tid => {
+                        const range = weightRanges.find(r => r.species_id === primarySpeciesId && r.size_category_id === tid);
+                        if (!range) return null;
+                        return `${range.min_weight}-${range.max_weight || '+'}kg`;
+                      })
+                      .filter(Boolean)
+                      .join(", ");
+
+                    if (tierCount === 0) {
+                      return <span className="text-rose-500 text-xs font-bold italic">No Pricing Rules Set</span>;
+                    }
+
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-blue-600 dark:text-blue-400 text-xs font-bold bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded w-fit">
+                          {tierCount} Unique Tiers Configured
+                        </span>
+                        {preview && (
+                          <p className="text-[10px] text-slate-400 italic mt-1 leading-tight max-w-[180px]">
+                            {preview}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </td>
                 <td className="px-4 py-4">
                   <span
@@ -384,16 +432,13 @@ export default function ServiceManagementTab() {
                         onChange={e => {
                           const type = e.target.value;
                           let basis = 'none';
-                          if (type === 'size_based') basis = 'size';
                           if (type === 'weight_based') basis = 'weight';
                           setFormData({...formData, pricing_type: type, measurement_basis: basis});
                         }}
                         className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white"
                       >
                         <option value="fixed">Fixed Price</option>
-                        <option value="size_based">Size Based</option>
                         <option value="weight_based">Weight Based</option>
-                        <option value="rule_based">Rule-Based (Advanced)</option>
                       </select>
                     </div>
                     {formData.pricing_type === 'fixed' && (
@@ -404,145 +449,29 @@ export default function ServiceManagementTab() {
                     )}
                   </div>
 
-                  {formData.pricing_type === 'rule_based' && (
-                    <div className="dark:border-dark-border bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-200">
-                      <div className="flex items-center justify-between mb-3 border-b border-blue-100 dark:border-blue-900/50 pb-2">
-                        <p className="text-sm font-bold text-blue-800 dark:text-blue-400">Rule-Based Configuration</p>
-                        <button 
-                          type="button" 
-                          onClick={() => setFormData({...formData, pricing_rules: [...formData.pricing_rules, { basis_type: 'rule', price: 0, species_id: null, breed_id: null, min_weight: null, max_weight: null, size_category_id: null }]})}
-                          className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                        >
-                          <FiPlus /> Add Rule
-                        </button>
-                      </div>
-                      
-                      <div className="space-y-4 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                        {formData.pricing_rules.filter(r => r.basis_type === 'rule').map((rule, ridx) => (
-                          <div key={ridx} className="bg-white dark:bg-dark-card border dark:border-dark-border rounded-lg p-3 relative group">
-                            <button 
-                              type="button" 
-                              onClick={() => {
-                                const newRules = [...formData.pricing_rules];
-                                newRules.splice(formData.pricing_rules.indexOf(rule), 1);
-                                setFormData({...formData, pricing_rules: newRules});
-                              }}
-                              className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                            >
-                              <FiX size={12} />
-                            </button>
-                            
-                            <div className="grid grid-cols-2 gap-3 mb-3">
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Match Species</label>
-                                <select 
-                                  value={rule.species_id || ""} 
-                                  onChange={e => {
-                                    const rules = [...formData.pricing_rules];
-                                    rules[formData.pricing_rules.indexOf(rule)].species_id = e.target.value || null;
-                                    setFormData({...formData, pricing_rules: rules});
-                                  }}
-                                  className="w-full text-xs rounded border border-slate-200 p-1 dark:bg-dark-surface dark:border-dark-border dark:text-white"
-                                >
-                                  <option value="">Any Species</option>
-                                  {(window.MDM_SPECIES || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Match Size</label>
-                                <select 
-                                  value={rule.size_category_id || ""} 
-                                  onChange={e => {
-                                    const rules = [...formData.pricing_rules];
-                                    rules[formData.pricing_rules.indexOf(rule)].size_category_id = e.target.value || null;
-                                    setFormData({...formData, pricing_rules: rules});
-                                  }}
-                                  className="w-full text-xs rounded border border-slate-200 p-1 dark:bg-dark-surface dark:border-dark-border dark:text-white"
-                                >
-                                  <option value="">Any Size</option>
-                                  {petSizes.map(sz => <option key={sz.id} value={sz.id}>{sz.name}</option>)}
-                                </select>
-                              </div>
-                            </div>
-                            
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1">
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Weight Range (kg)</label>
-                                <div className="flex items-center gap-2">
-                                  <input type="number" placeholder="Min" value={rule.min_weight || ""} onChange={e => {
-                                    const rules = [...formData.pricing_rules];
-                                    rules[formData.pricing_rules.indexOf(rule)].min_weight = e.target.value || null;
-                                    setFormData({...formData, pricing_rules: rules});
-                                  }} className="w-full text-xs rounded border border-slate-200 p-1 dark:bg-dark-surface dark:border-dark-border dark:text-white" />
-                                  <span className="text-slate-400">to</span>
-                                  <input type="number" placeholder="Max" value={rule.max_weight || ""} onChange={e => {
-                                    const rules = [...formData.pricing_rules];
-                                    rules[formData.pricing_rules.indexOf(rule)].max_weight = e.target.value || null;
-                                    setFormData({...formData, pricing_rules: rules});
-                                  }} className="w-full text-xs rounded border border-slate-200 p-1 dark:bg-dark-surface dark:border-dark-border dark:text-white" />
-                                </div>
-                              </div>
-                              <div className="w-24">
-                                <label className="block text-[10px] font-bold text-slate-400 uppercase">Result Fee (₱)</label>
-                                <input required type="number" step="0.01" value={rule.price} onChange={e => {
-                                  const rules = [...formData.pricing_rules];
-                                  rules[formData.pricing_rules.indexOf(rule)].price = e.target.value;
-                                  setFormData({...formData, pricing_rules: rules});
-                                }} className="w-full text-xs font-bold rounded border border-slate-200 p-1 dark:bg-dark-surface dark:border-dark-border dark:text-white" />
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-3 text-[10px] text-blue-600 dark:text-blue-500 italic">Rules are evaluated top-down. The first matching rule applies.</p>
-                    </div>
-                  )}
-
-                  {formData.pricing_type === 'size_based' && (
-                    <div className="dark:border-dark-border bg-slate-50/50 dark:bg-dark-surface/50 p-3 rounded-xl border">
-                      <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-3">Service Fee per Size Category</p>
-                      <div className="space-y-3 max-h-40 overflow-y-auto pr-2">
-                        {petSizes.map(size => {
-                          const rule = formData.pricing_rules.find(r => r.basis_type === 'size' && r.reference_id === size.id);
-                          return (
-                            <div key={size.id} className="flex items-center justify-between gap-4">
-                              <span className="text-sm text-slate-600 dark:text-zinc-400">{size.name}</span>
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">₱</span>
-                                <input 
-                                  type="number" required placeholder="0.00" value={rule?.price || ""} 
-                                  onChange={e => {
-                                    const otherRules = formData.pricing_rules.filter(r => !(r.basis_type === 'size' && r.reference_id === size.id));
-                                    setFormData({...formData, pricing_rules: [...otherRules, { basis_type: 'size', reference_id: size.id, price: e.target.value }]});
-                                  }}
-                                  className="w-32 rounded-xl border border-slate-200 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" 
-                                />
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-
                   {formData.pricing_type === 'weight_based' && (
-                    <div className="dark:border-dark-border bg-slate-50/50 dark:bg-dark-surface/50 p-3 rounded-xl border">
-                      <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Service Fee by Mapped Weight</p>
-                      <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
+                    <div className="dark:border-dark-border bg-slate-50/50 dark:bg-dark-surface/50 p-4 rounded-xl border">
+                      <p className="text-sm font-bold text-slate-800 dark:text-zinc-200 mb-1">Service Fee by Weight Bracket</p>
+                      <p className="text-[10px] text-slate-500 mb-4 italic">Specify the professional fee for each weight-derived tier.</p>
+                      
+                      <div className="space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
                         {petSizes.map(size => {
                           const rule = formData.pricing_rules.find(r => r.basis_type === 'size' && r.reference_id === size.id);
                           return (
-                            <div key={size.id} className="flex items-center justify-between gap-4">
-                              <span className="text-sm text-slate-600 dark:text-zinc-400">{size.name}</span>
+                            <div key={size.id} className="flex items-center justify-between gap-4 bg-white dark:bg-dark-card p-3 rounded-lg border dark:border-dark-border shadow-sm">
+                              <div>
+                                <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">{size.name}</span>
+                                <p className="text-[10px] text-slate-400">Calculated via Weight Ranges</p>
+                              </div>
                               <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">₱</span>
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">₱</span>
                                 <input 
                                   type="number" required placeholder="0.00" value={rule?.price || ""} 
                                   onChange={e => {
                                     const otherRules = formData.pricing_rules.filter(r => !(r.basis_type === 'size' && r.reference_id === size.id));
                                     setFormData({...formData,  pricing_rules: [...otherRules, { basis_type: 'size', reference_id: size.id, price: e.target.value }]});
                                   }}
-                                  className="w-32 rounded-xl border border-slate-200 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" 
+                                  className="w-32 rounded-xl border border-slate-200 py-2 pl-7 pr-3 text-sm font-bold focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" 
                                 />
                               </div>
                             </div>
@@ -593,10 +522,10 @@ export default function ServiceManagementTab() {
                       <div className="flex justify-between text-sm mb-2">
                          <span className="text-slate-600 dark:text-zinc-400 font-medium">Linked Consumable Cost (Internal):</span>
                          <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                           ₱{formData.linked_items.reduce((acc, li) => {
+                           <span>₱{formData.linked_items.reduce((acc, li) => {
                              const inv = inventories.find(i => i.id === Number(li.inventory_id));
-                             return acc + ((Number(inv?.price) || 0) * Number(li.quantity || 0));
-                           }, 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                             return acc + ((Number(inv?.cost_price) || 0) * Number(li.quantity || 0));
+                           }, 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}</span>
                          </span>
                       </div>
                       
@@ -605,10 +534,10 @@ export default function ServiceManagementTab() {
                           {formData.linked_items.map((li, idx) => {
                             const inv = inventories.find(i => i.id === Number(li.inventory_id));
                             if (!inv) return null;
-                            const lineCost = (Number(inv.price) || 0) * Number(li.quantity || 0);
+                            const lineCost = (Number(inv.cost_price) || 0) * Number(li.quantity || 0);
                             return (
                               <div key={idx} className="flex justify-between text-[11px] text-slate-500 italic">
-                                <span>• {li.quantity}x {inv.item_name} (@₱{Number(inv.price || 0).toFixed(2)})</span>
+                                <span>• {li.quantity}x {inv.item_name} (@₱{Number(inv.cost_price || 0).toFixed(2)})</span>
                                 <span>₱{lineCost.toFixed(2)}</span>
                               </div>
                             );
@@ -617,26 +546,43 @@ export default function ServiceManagementTab() {
                       )}
                     </div>
 
-                    <div className="border-t-2 border-slate-200 dark:border-dark-border pt-4 flex justify-between font-black text-base text-blue-600 dark:text-blue-400 uppercase tracking-tight">
-                      <span>Estimated Service Total:</span>
-                      <span>
-                        {formData.pricing_type === 'fixed' 
-                          ? `₱${(
-                              Number(formData.professional_fee || 0) + 
-                              formData.linked_items.reduce((acc, li) => {
-                                const inv = inventories.find(i => i.id === Number(li.inventory_id));
-                                return acc + ((Number(inv?.price) || 0) * Number(li.quantity || 0));
-                              }, 0)
-                            ).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
-                          : (
-                            <span className="text-xs normal-case font-bold">
-                              Computed at Invoice + ₱{formData.linked_items.reduce((acc, li) => {
-                                const inv = inventories.find(i => i.id === Number(li.inventory_id));
-                                return acc + ((Number(inv?.price) || 0) * Number(li.quantity || 0));
-                              }, 0).toFixed(2)} Items
-                            </span>
-                          )}
-                      </span>
+                    <div className="border-t-2 border-slate-200 dark:border-dark-border pt-4">
+                      <div className="flex justify-between font-black text-xs text-slate-500 uppercase tracking-tight mb-1">
+                        <span>Total Internal Cost:</span>
+                        <span className="text-slate-700 dark:text-zinc-300">
+                          ₱{(
+                            Number(formData.professional_fee || 0) + 
+                            formData.linked_items.reduce((acc, li) => {
+                              const inv = inventories.find(i => i.id === Number(li.inventory_id));
+                              return acc + ((Number(inv?.cost_price) || 0) * Number(li.quantity || 0));
+                            }, 0)
+                          ).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between font-black text-base text-blue-600 dark:text-blue-400 uppercase tracking-tight">
+                        <span>Est. Service Total (Client):</span>
+                        <span>
+                          {formData.pricing_type === 'fixed' 
+                            ? `₱${(
+                                Number(formData.professional_fee || 0) + 
+                                formData.linked_items.reduce((acc, li) => {
+                                  if (!li.is_billable) return acc;
+                                  const inv = inventories.find(i => i.id === Number(li.inventory_id));
+                                  return acc + ((Number(inv?.selling_price) || 0) * Number(li.quantity || 0));
+                                }, 0)
+                              ).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
+                            : (
+                              <span className="text-xs normal-case font-bold">
+                                Base + ₱{formData.linked_items.reduce((acc, li) => {
+                                  if (!li.is_billable) return acc;
+                                  const inv = inventories.find(i => i.id === Number(li.inventory_id));
+                                  return acc + ((Number(inv?.selling_price) || 0) * Number(li.quantity || 0));
+                                }, 0).toFixed(2)} Billable
+                              </span>
+                            )}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -655,7 +601,7 @@ export default function ServiceManagementTab() {
                 <div className="space-y-4">
                   {formData.linked_items.map((li, idx) => {
                     const inv = inventories.find(i => i.id === Number(li.inventory_id));
-                    const costPrice = Number(inv?.price || 0);
+                    const costPrice = Number(inv?.cost_price || 0);
                     const lineTotalCost = costPrice * Number(li.quantity || 0);
 
                     return (
@@ -677,7 +623,7 @@ export default function ServiceManagementTab() {
                             {inventories.filter(i => {
                               const cat = i.inventory_category?.name || "";
                               const eligibleCats = ["Consumables", "Medicines", "Vaccines", "Grooming Supplies", "Preventive Care Supplies", "Supplies"];
-                              return i.is_consumable || eligibleCats.includes(cat);
+                              return i.is_service_usable || eligibleCats.includes(cat);
                             }).map(i => (
                               <option key={i.id} value={i.id}>{i.item_name} [{i.inventory_category?.name || 'Item'}]</option>
                             ))}
@@ -702,27 +648,39 @@ export default function ServiceManagementTab() {
 
                       {/* Cost Display Block */}
                       {inv && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-white dark:bg-dark-card p-3 rounded-lg border dark:border-dark-border shadow-sm">
-                           <div>
-                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cost Price</p>
-                             <p className={clsx("text-sm font-bold", costPrice === 0 ? "text-rose-500" : "text-slate-700 dark:text-zinc-200")}>
-                               ₱{costPrice.toLocaleString("en-PH", { minimumFractionDigits: 2 })}
-                               {costPrice === 0 && <span className="ml-1 text-[8px] animate-pulse">(Missing!)</span>}
-                             </p>
-                           </div>
-                           <div>
-                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Unit</p>
-                             <p className="text-sm font-medium text-slate-600 dark:text-zinc-400">{inv.unit || 'unit(s)'}</p>
-                           </div>
-                           <div>
-                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Line Qty</p>
-                             <p className="text-sm font-medium text-slate-600 dark:text-zinc-400">{li.quantity}</p>
-                           </div>
-                           <div className="text-right">
-                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Subtotal Cost</p>
-                             <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">₱{lineTotalCost.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</p>
-                           </div>
-                        </div>
+                        <>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-white dark:bg-dark-card p-3 rounded-lg border dark:border-dark-border shadow-sm">
+                             <div>
+                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cost Price</p>
+                               <p className={clsx("text-sm font-bold", costPrice === 0 ? "text-rose-500" : "text-slate-700 dark:text-zinc-200")}>
+                                 ₱{costPrice.toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                                 {(costPrice === 0 || costPrice === null) && <span className="ml-1 text-[8px] animate-pulse">(Missing!)</span>}
+                               </p>
+                             </div>
+                             <div>
+                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Unit</p>
+                               <p className="text-sm font-medium text-slate-600 dark:text-zinc-400">{inv.unit || 'unit(s)'}</p>
+                             </div>
+                             <div>
+                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Line Qty</p>
+                               <p className="text-sm font-medium text-slate-600 dark:text-zinc-400">{li.quantity}</p>
+                             </div>
+                             <div className="text-right">
+                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Subtotal Cost</p>
+                               <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">₱{lineTotalCost.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</p>
+                             </div>
+                          </div>
+  
+                          {li.is_billable && (
+                             <div className="flex items-center justify-between mt-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/20 rounded-lg">
+                                <p className="text-[10px] font-bold text-blue-800 dark:text-blue-400 uppercase tracking-wider">Billable Price (Markup)</p>
+                                <p className={clsx("text-sm font-bold", !(Number(inv.selling_price) > 0) ? "text-rose-500" : "text-blue-700 dark:text-blue-400")}>
+                                  ₱{Number(inv.selling_price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                                  {!(Number(inv.selling_price) > 0) && <span className="ml-1 text-[8px] animate-pulse">(No Selling Price!)</span>}
+                                </p>
+                             </div>
+                          )}
+                        </>
                       )}
                       
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">

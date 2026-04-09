@@ -89,33 +89,6 @@ class PricingService
             return (float) ($service->professional_fee ?? $service->price ?? 0) * $quantity;
         }
 
-        if ($service->pricing_type === 'size_based' && isset($pet)) {
-            $petSizeId = $pet->size_category_id;
-            
-            if ($petSizeId) {
-                $rule = $service->pricingRules()
-                    ->where('basis_type', 'size')
-                    ->where('reference_id', $petSizeId)
-                    ->first();
-                
-                if ($rule) {
-                    return (float) $rule->price * $quantity;
-                }
-            }
-
-            // Fallback for legacy size_class
-            if ($pet->size_class) {
-                $priceRecord = $service->sizePrices() // Note: sizePrices might be legacy too
-                    ->where('size_class', $pet->size_class)
-                    ->first();
-                if ($priceRecord) {
-                    return (float) $priceRecord->price * $quantity;
-                }
-            }
-
-            throw new \Exception("No pricing rule configured for service '{$service->name}' for pet size.");
-        }
-
         if ($service->pricing_type === 'weight_based' && isset($pet)) {
             $petWeight = $weight ?? (float) $pet->weight;
             
@@ -144,38 +117,6 @@ class PricingService
             }
 
             throw new \Exception("No pricing rule configured for weight '{$petWeight}kg' (Species: {$pet->species_id}) for service '{$service->name}'.");
-        }
-
-        if ($service->pricing_type === 'rule_based' && isset($pet)) {
-            $petWeight = $weight ?? (float) $pet->weight;
-            
-            $rule = $service->pricingRules()
-                ->where('basis_type', 'rule')
-                ->where(function ($q) use ($pet, $petWeight) {
-                    $q->where(function ($sq) use ($pet) {
-                        $sq->whereNull('species_id')->orWhere('species_id', $pet->species_id);
-                    })
-                    ->where(function ($sq) use ($pet) {
-                        $sq->whereNull('breed_id')->orWhere('breed_id', $pet->breed_id);
-                    })
-                    ->where(function ($sq) use ($petWeight) {
-                        $sq->whereNull('min_weight')->orWhere('min_weight', '<=', $petWeight);
-                    })
-                    ->where(function ($sq) use ($petWeight) {
-                        $sq->whereNull('max_weight')->orWhere('max_weight', '>=', $petWeight);
-                    })
-                    ->where(function ($sq) use ($pet) {
-                        $sq->whereNull('size_category_id')->orWhere('size_category_id', $pet->size_category_id);
-                    });
-                })
-                ->orderBy('id', 'asc')
-                ->first();
-
-            if ($rule) {
-                return (float) $rule->price * $quantity;
-            }
-
-            throw new \Exception("No specific pricing rule matched for service '{$service->name}'.");
         }
 
         // Final fallback: Use professional_fee or legacy price

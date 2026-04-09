@@ -383,7 +383,7 @@ function InvoiceModuleView() {
     ).map(s => ({ ...s, type: 'service' }));
 
     const filteredInventory = (Array.isArray(inventory) ? inventory : []).filter(i => 
-      i.is_billable && (
+      i.is_sellable && (
         i.item_name.toLowerCase().includes(term) || 
         i.sku?.toLowerCase().includes(term) ||
         i.category?.toLowerCase().includes(term)
@@ -401,10 +401,8 @@ function InvoiceModuleView() {
   }, [services, inventory, serviceInput]);
 
   const calculateDynamicPrice = (service) => {
-    if (service.pricing_type === "size_based" && patientDetails?.size_category_id) {
-      const rule = service.pricing_rules?.find(r => r.basis_type === 'size' && r.reference_id === patientDetails.size_category_id);
-      if (rule) return Number(rule.price);
-    }
+    // size_based is deprecated, merging into weight_based logic if needed, 
+    // but for now only weight_based and fixed are supported.
     
     if (service.pricing_type === "weight_based" && currentWeight !== "") {
       const petWeight = Number(currentWeight);
@@ -463,7 +461,7 @@ function InvoiceModuleView() {
     }
 
     // Check inventory
-    const matchedInv = inventory.find(i => i.item_name.toLowerCase() === val.toLowerCase() && i.is_billable);
+    const matchedInv = inventory.find(i => i.item_name.toLowerCase() === val.toLowerCase() && i.is_sellable);
     if (matchedInv) {
       setPriceInput(matchedInv.selling_price || 0);
       setSelectedService({ ...matchedInv, name: matchedInv.item_name, type: 'inventory' });
@@ -538,9 +536,7 @@ function InvoiceModuleView() {
         const breakdown = await res.json();
         
         let itemName = serviceInput;
-        if (selectedService.pricing_type === "size_based" && patientDetails?.size_category_id) {
-           itemName = `${serviceInput} (${patientDetails.size_category?.name || 'Selected Size'})`;
-        } else if (selectedService.pricing_type === "weight_based" && currentWeight !== "") {
+        if (selectedService.pricing_type === "weight_based" && currentWeight !== "") {
            itemName = `${serviceInput} (${currentWeight}kg)`;
         }
 

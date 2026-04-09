@@ -34,30 +34,35 @@ class ServicesSeeder extends Seeder
             ]
         );
 
-        // 3. Grooming (Size-based)
+        // 3. Grooming (Weight-based)
         $grooming = Service::updateOrCreate(
             ['name' => 'Full Grooming'],
             [
                 'description' => 'Complete bath, hair cut, and nail trimming',
-                'price' => 500.00, // Base price for 'Small'
-                'pricing_mode' => 'size_based',
+                'professional_fee' => 500.00,
+                'pricing_type' => 'weight_based',
+                'measurement_basis' => 'weight',
                 'category' => 'Grooming',
                 'status' => 'Active'
             ]
         );
 
-        $groomingPrices = [
+        $sizeMapping = [
+            'Extra Small' => 400.00,
             'Small' => 500.00,
             'Medium' => 700.00,
             'Large' => 900.00,
             'Giant' => 1200.00
         ];
 
-        foreach ($groomingPrices as $size => $price) {
-            ServicePrice::updateOrCreate(
-                ['service_id' => $grooming->id, 'size_class' => $size],
-                ['price' => $price]
-            );
+        foreach ($sizeMapping as $sizeName => $price) {
+            $size = \App\Models\PetSizeCategory::where('name', $sizeName)->first();
+            if ($size) {
+                \App\Models\ServicePricingRule::updateOrCreate(
+                    ['service_id' => $grooming->id, 'basis_type' => 'size', 'reference_id' => $size->id],
+                    ['price' => $price]
+                );
+            }
         }
 
         // 4. Medicines (Quantity-based)
