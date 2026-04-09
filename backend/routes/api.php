@@ -111,6 +111,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
         Route::apiResource('appointments',    AppointmentController::class);
 
+        Route::get('invoices/resolve-breakdown', [InvoiceController::class, 'resolveBreakdown']);
         Route::apiResource('invoices',        InvoiceController::class);
         Route::apiResource('services',        ServiceController::class);
         Route::apiResource('medical-records', MedicalRecordController::class);

@@ -1,0 +1,8 @@
+[
+    {
+        "CONSTRAINT_NAME": "invoices_appointment_id_foreign",
+        "COLUMN_NAME": "appointment_id",
+        "REFERENCED_TABLE_NAME": "appointments",
+        "REFERENCED_COLUMN_NAME": "id"
+    }
+]

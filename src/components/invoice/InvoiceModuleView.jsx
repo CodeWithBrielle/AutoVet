@@ -151,12 +151,16 @@ async function generateInvoicePDF(invoiceData, patient, clinic) {
       3: { halign: 'right', cellWidth: 35 },
     },
     head: [["DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]],
-    body: invoiceData.items.filter(item => !item.is_hidden).map(item => [
-      item.name.toUpperCase() + (item.notes ? "\n" + item.notes : ""),
-      item.qty,
-      (item.unitPrice || item.unit_price || 0).toFixed(2),
-      (item.amount || 0).toFixed(2)
-    ]),
+    body: invoiceData.items.filter(item => !item.is_hidden).map(item => {
+      let subtitle = item.notes;
+      if (!subtitle && item.item_type === 'service') subtitle = 'Service Fee';
+      return [
+        item.name.toUpperCase() + (subtitle ? "\n" + subtitle : ""),
+        item.qty,
+        (item.unitPrice || item.unit_price || 0).toFixed(2),
+        (item.amount || 0).toFixed(2)
+      ]
+    }),
   });
 
   y = doc.lastAutoTable.finalY + 15;
@@ -419,18 +423,30 @@ function InvoiceModuleView() {
       }
     }
 
-    return Number(service.base_price || service.price) || 0;
+    return Number(service.professional_fee || service.price) || 0;
   };
 
-  const selectItemFromDropdown = (item) => {
+  const selectItemFromDropdown = async (item) => {
     setServiceInput(item.name);
+    setSelectedService(item);
+    setIsDropdownOpen(false);
+
     if (item.type === 'service') {
-      setPriceInput(calculateDynamicPrice(item));
+      try {
+        const headers = {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${user.token}`
+        };
+        const res = await fetch(`/api/invoices/resolve-breakdown?service_id=${item.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`, { headers });
+        if (!res.ok) throw new Error("Breakdown failed");
+        const breakdown = await res.json();
+        setPriceInput(breakdown.professional_fee);
+      } catch (e) {
+        setPriceInput(calculateDynamicPrice(item));
+      }
     } else {
       setPriceInput(item.selling_price || item.price || 0);
     }
-    setSelectedService(item);
-    setIsDropdownOpen(false);
   };
 
   const handleServiceChange = (e) => {
@@ -458,35 +474,115 @@ function InvoiceModuleView() {
   };
 
 
-  const manuallyAddItem = () => {
-    if (!serviceInput) return;
-    const price = Number(priceInput) || 0;
-    const qty = Number(qtyInput) || 1;
-    
-    let itemName = serviceInput;
-    let itemType = selectedService?.type || 'service';
-    let serviceId = itemType === 'service' ? selectedService?.id : null;
-    let inventoryId = itemType === 'inventory' ? selectedService?.id : null;
+  const addServiceLineItems = (itemName, breakdown, service) => {
+    const timestamp = Date.now();
+    const newItems = [];
 
-    if (itemType === 'service' && selectedService?.pricing_type === "size_based" && patientDetails?.size_category_id) {
-       itemName = `${serviceInput} (${patientDetails.size_category?.name || 'Selected Size'})`;
-    } else if (itemType === 'service' && selectedService?.pricing_type === "weight_based" && currentWeight !== "") {
-       itemName = `${serviceInput} (${currentWeight}kg)`;
-    }
-      
-    const newItem = {
-      id: `li-${Date.now()}`,
+    // 1. The Professional Fee line
+    newItems.push({
+      id: `li-svc-${timestamp}`,
       name: itemName,
-      item_type: itemType,
-      service_id: serviceId,
-      inventory_id: inventoryId,
-      notes: itemType === 'inventory' ? "Inventory Product" : "Service",
-      qty: qty,
-      unitPrice: price,
-      amount: price * qty,
-      indicator: itemType === 'inventory' ? "bg-emerald-400" : "bg-blue-400",
-    };
-    setItems((prev) => [...prev, newItem]);
+      item_type: 'service',
+      service_id: service.id,
+      line_type: 'service',
+      notes: "Professional Fee",
+      qty: qtyInput,
+      unitPrice: breakdown.professional_fee,
+      amount: breakdown.professional_fee * qtyInput,
+      indicator: "bg-blue-400",
+      is_hidden: service.show_on_invoice === false,
+      is_billable: service.show_on_invoice !== false,
+      metadata_snapshot: breakdown.metadata || {}
+    });
+
+    // 2. The Item lines (Linked Consumables)
+    if (breakdown.item_lines && breakdown.item_lines.length > 0) {
+      breakdown.item_lines.forEach((line, idx) => {
+        const inv = inventory.find(i => i.id === line.inventory_id);
+        const itemQty = line.quantity; 
+        const isBillable = line.is_billable;
+        const unitPrice = line.unit_price;
+
+        newItems.push({
+          id: `li-item-${timestamp}-${idx}`,
+          name: inv?.item_name || "Linked Item",
+          item_type: 'inventory',
+          inventory_id: line.inventory_id,
+          line_type: 'item',
+          notes: line.notes || `Linked to ${itemName}`,
+          qty: itemQty,
+          unitPrice: unitPrice,
+          amount: unitPrice * itemQty,
+          indicator: "bg-emerald-400",
+          is_hidden: !isBillable,
+          is_billable: isBillable,
+          can_modify: service.allow_manual_item_override !== false
+        });
+      });
+    }
+
+    setItems((prev) => [...prev, ...newItems]);
+  };
+
+  const manuallyAddItem = async () => {
+    if (!serviceInput) return;
+    
+    if (selectedService?.type === 'service') {
+      try {
+        const headers = {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${user.token}`
+        };
+        const res = await fetch(`/api/invoices/resolve-breakdown?service_id=${selectedService.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`, { headers });
+        if (!res.ok) throw new Error("Failed to fetch breakdown");
+        const breakdown = await res.json();
+        
+        let itemName = serviceInput;
+        if (selectedService.pricing_type === "size_based" && patientDetails?.size_category_id) {
+           itemName = `${serviceInput} (${patientDetails.size_category?.name || 'Selected Size'})`;
+        } else if (selectedService.pricing_type === "weight_based" && currentWeight !== "") {
+           itemName = `${serviceInput} (${currentWeight}kg)`;
+        }
+
+        addServiceLineItems(itemName, breakdown, selectedService);
+      } catch (e) {
+        toast.error("Cloud pricing failed, using local fallback.");
+        // Fallback to legacy manual addition
+        const price = Number(priceInput) || 0;
+        const qty = Number(qtyInput) || 1;
+        const newItem = {
+          id: `li-${Date.now()}`,
+          name: serviceInput,
+          item_type: 'service',
+          service_id: selectedService.id,
+          notes: "Service Fee (Manual)",
+          qty: qty,
+          unitPrice: price,
+          amount: price * qty,
+          indicator: "bg-blue-400",
+        };
+        setItems((prev) => [...prev, newItem]);
+      }
+    } else {
+      // Inventory or Ad-hoc
+      const price = Number(priceInput) || 0;
+      const qty = Number(qtyInput) || 1;
+      const itemType = selectedService?.type || 'inventory';
+      
+      const newItem = {
+        id: `li-${Date.now()}`,
+        name: serviceInput,
+        item_type: itemType,
+        inventory_id: itemType === 'inventory' ? selectedService?.id : null,
+        notes: itemType === 'inventory' ? "Inventory Product" : "Manual Adjustment",
+        qty: qty,
+        unitPrice: price,
+        amount: price * qty,
+        indicator: itemType === 'inventory' ? "bg-emerald-400" : "bg-slate-400",
+      };
+      setItems((prev) => [...prev, newItem]);
+    }
+
     setServiceInput("");
     setQtyInput(1);
     setPriceInput(50);
@@ -558,6 +654,7 @@ function InvoiceModuleView() {
       notes_to_client: notes,
       items: items.map(item => ({
         item_type: item.item_type || 'service',
+        line_type: item.line_type || (item.item_type === 'service' ? 'service' : 'item'),
         service_id: item.service_id,
         inventory_id: item.inventory_id,
         name: item.name,
@@ -565,7 +662,11 @@ function InvoiceModuleView() {
         qty: item.qty,
         unit_price: item.unitPrice,
         amount: item.amount,
-        is_hidden: !!item.is_hidden
+        is_hidden: !!item.is_hidden,
+        is_billable: item.is_billable ?? !item.is_hidden,
+        unit_price_snapshot: item.unitPrice,
+        line_total_snapshot: item.amount,
+        metadata_snapshot: item.metadata_snapshot || null
       }))
     };
     if (!selectedAppointmentId) {
@@ -641,6 +742,7 @@ function InvoiceModuleView() {
                       onChange={(e) => {
                         setSelectedOwnerId(e.target.value);
                         setSelectedPatientId(""); // reset pet
+                        setSelectedAppointmentId(""); // reset appointment
                         setPatientDetails(null);
                         setAppointments([]);
                       }}
@@ -849,15 +951,33 @@ function InvoiceModuleView() {
                             {item.name}
                             <span className={clsx(
                               "ml-2 text-[10px] uppercase px-1.5 py-0.5 rounded-md font-bold",
-                              item.item_type === 'inventory' ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
+                              item.item_type === 'inventory' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                             )}>
                               {item.item_type === 'inventory' ? 'Product' : 'Service'}
                             </span>
+                            {item.is_hidden && (
+                              <span className="ml-1 text-[10px] uppercase px-1.5 py-0.5 rounded-md font-bold bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                Internal
+                              </span>
+                            )}
                           </p>
                           <p className="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">{item.notes}</p>
                         </div>
-                        <p className="text-2xl font-semibold text-slate-900 dark:text-zinc-50">{currency(item.amount)}</p>
+                        <div className="text-right">
+                          <p className="text-2xl font-semibold text-slate-900 dark:text-zinc-50">{currency(item.amount)}</p>
+                          {status === "Draft" && (
+                            <button onClick={() => removeItem(item.id)} className="mt-1 text-xs font-semibold text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300">
+                              Remove
+                            </button>
+                          )}
+                        </div>
                       </div>
+
+                      {item.is_hidden && (
+                          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 italic">
+                            This item is used for internal tracking and inventory deduction. It will not appear on the client's printed invoice.
+                          </div>
+                      )}
 
                       {item.warning ? (
                         <span className="mt-2 inline-block rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
@@ -1072,7 +1192,9 @@ function InvoiceModuleView() {
                             {item.item_type === 'inventory' ? 'PROD' : 'SERV'}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 dark:text-zinc-400">{item.notes}</p>
+                        <p className="text-xs text-slate-500 dark:text-zinc-400">
+                          {item.notes || (item.item_type === 'service' ? 'Service Fee' : '')}
+                        </p>
                       </div>
                       <input
                         type="number"
