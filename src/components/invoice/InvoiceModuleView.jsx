@@ -401,13 +401,8 @@ function InvoiceModuleView() {
   }, [services, inventory, serviceInput]);
 
   const calculateDynamicPrice = (service) => {
-    // size_based is deprecated, merging into weight_based logic if needed, 
-    // but for now only weight_based and fixed are supported.
-    
-    if (service.pricing_type === "weight_based" && currentWeight !== "") {
-      const petWeight = Number(currentWeight);
-      const petSpeciesId = patientDetails?.species_id;
-      
+    if (service.pricing_type === "weight_based" && patientDetails?.weight !== null) {
+      const petWeight = Number(patientDetails.weight);
       const range = weightRanges.find(r => 
         (Number(r.species_id) === Number(petSpeciesId)) &&
         Number(r.min_weight) <= petWeight && 
@@ -443,7 +438,7 @@ function InvoiceModuleView() {
         setPriceInput(calculateDynamicPrice(item));
       }
     } else {
-      setPriceInput(item.selling_price || item.price || 0);
+      setPriceInput(item.selling_price ?? 0);
     }
   };
 
@@ -463,7 +458,7 @@ function InvoiceModuleView() {
     // Check inventory
     const matchedInv = inventory.find(i => i.item_name.toLowerCase() === val.toLowerCase() && i.is_sellable);
     if (matchedInv) {
-      setPriceInput(matchedInv.selling_price || 0);
+      setPriceInput(matchedInv.selling_price ?? 0);
       setSelectedService({ ...matchedInv, name: matchedInv.item_name, type: 'inventory' });
       return;
     }
@@ -525,45 +520,14 @@ function InvoiceModuleView() {
   const manuallyAddItem = async () => {
     if (!serviceInput) return;
     
-    if (selectedService?.type === 'service') {
-      try {
-        const headers = {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user.token}`
-        };
-        const res = await fetch(`/api/invoices/resolve-breakdown?service_id=${selectedService.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`, { headers });
-        if (!res.ok) throw new Error("Failed to fetch breakdown");
-        const breakdown = await res.json();
-        
-        let itemName = serviceInput;
-        if (selectedService.pricing_type === "weight_based" && currentWeight !== "") {
-           itemName = `${serviceInput} (${currentWeight}kg)`;
-        }
+    let itemName = serviceInput;
+    let itemType = selectedService?.type || 'service';
+    let serviceId = itemType === 'service' ? selectedService?.id : null;
+    let inventoryId = itemType === 'inventory' ? selectedService?.id : null;
 
-        addServiceLineItems(itemName, breakdown, selectedService);
-      } catch (e) {
-        toast.error("Cloud pricing failed, using local fallback.");
-        // Fallback to legacy manual addition
-        const price = Number(priceInput) || 0;
-        const qty = Number(qtyInput) || 1;
-        const newItem = {
-          id: `li-${Date.now()}`,
-          name: serviceInput,
-          item_type: 'service',
-          service_id: selectedService.id,
-          notes: "Service Fee (Manual)",
-          qty: qty,
-          unitPrice: price,
-          amount: price * qty,
-          indicator: "bg-blue-400",
-        };
-        setItems((prev) => [...prev, newItem]);
-      }
-    } else {
-      // Inventory or Ad-hoc
-      const price = Number(priceInput) || 0;
-      const qty = Number(qtyInput) || 1;
-      const itemType = selectedService?.type || 'inventory';
+    if (itemType === 'service' && selectedService?.pricing_type === "weight_based" && patientDetails?.weight !== null) {
+       itemName = `${serviceInput} (${patientDetails.weight}kg)`;
+    }
       
       const newItem = {
         id: `li-${Date.now()}`,

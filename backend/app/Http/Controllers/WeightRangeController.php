@@ -22,8 +22,13 @@ class WeightRangeController extends Controller
         $sortBy = $request->get('sort_by', 'min_weight');
         $sortDirection = $request->get('sort_direction', 'asc');
         $query->orderBy($sortBy, $sortDirection);
-
-        return response()->json($query->paginate($request->get('per_page', 10)));
+        
+        $perPage = $request->get('per_page', 10);
+        if ($perPage == -1) {
+            return response()->json(['data' => $query->get()]);
+        }
+        
+        return response()->json($query->paginate($perPage));
     }
 
     public function store(Request $request)

@@ -16,6 +16,7 @@ class ServiceController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'price' => 'nullable|numeric|min:0',
             'pricing_type' => 'required|string|in:fixed,weight_based',
             'measurement_basis' => 'required|string|in:none,weight',
             'professional_fee' => 'nullable|numeric|min:0',
@@ -25,8 +26,8 @@ class ServiceController extends Controller
             'auto_load_linked_items' => 'nullable|boolean',
             'allow_manual_item_override' => 'nullable|boolean',
             'pricing_rules' => 'nullable|array',
-            'pricing_rules.*.basis_type' => 'required|string|in:size',
-            'pricing_rules.*.reference_id' => 'required|integer|exists:pet_size_categories,id',
+            'pricing_rules.*.basis_type' => 'required|string|in:weight',
+            'pricing_rules.*.reference_id' => 'required|integer',
             'pricing_rules.*.price' => 'required|numeric|min:0',
             'linked_items' => [
                 'nullable',
@@ -91,6 +92,7 @@ class ServiceController extends Controller
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
+            'price' => 'nullable|numeric|min:0',
             'pricing_type' => 'nullable|string|in:fixed,weight_based',
             'measurement_basis' => 'nullable|string|in:none,weight',
             'professional_fee' => 'nullable|numeric|min:0',
@@ -100,8 +102,8 @@ class ServiceController extends Controller
             'auto_load_linked_items' => 'nullable|boolean',
             'allow_manual_item_override' => 'nullable|boolean',
             'pricing_rules' => 'nullable|array',
-            'pricing_rules.*.basis_type' => 'required|string|in:size',
-            'pricing_rules.*.reference_id' => 'required|integer|exists:pet_size_categories,id',
+            'pricing_rules.*.basis_type' => 'required|string|in:weight',
+            'pricing_rules.*.reference_id' => 'required|integer',
             'pricing_rules.*.price' => 'required|numeric|min:0',
             'linked_items' => [
                 'nullable',

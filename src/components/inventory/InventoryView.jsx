@@ -326,11 +326,19 @@ function InventoryView() {
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex flex-col">
-                          <p className="text-sm text-slate-500 dark:text-zinc-500 line-through decoration-slate-300 font-medium">
-                            ₱{Number(row.cost_price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
-                          </p>
+                          {Number(row.selling_price ?? 0) > 0 && Number(row.price ?? 0) > 0 && (
+                            <p className="text-sm text-slate-500 dark:text-zinc-500 line-through decoration-slate-300 font-medium">
+                              ₱{Number(row.price ?? 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                            </p>
+                          )}
                           <p className="text-lg font-bold text-slate-900 dark:text-zinc-50">
-                            ₱{Number(row.selling_price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                            {Number(row.selling_price ?? 0) > 0 ? (
+                              `₱${Number(row.selling_price).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
+                            ) : (
+                              <span className="text-sm font-semibold text-slate-500 dark:text-zinc-400">
+                                Internal Use Only
+                              </span>
+                            )}
                           </p>
                         </div>
                       </td>

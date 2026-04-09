@@ -86,15 +86,11 @@ class PricingService
         }
 
         if ($service->pricing_type === 'fixed') {
-            return (float) ($service->professional_fee ?? $service->price ?? 0) * $quantity;
+            return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
         }
 
-        if ($service->pricing_type === 'weight_based' && isset($pet)) {
-            $petWeight = $weight ?? (float) $pet->weight;
-            
-            if ($petWeight === null || $petWeight <= 0) {
-                throw new \Exception("Pet weight is required for weight-based service '{$service->name}'.");
-            }
+        if ($service->pricing_type === 'weight_based' && isset($pet) && $pet->weight !== null) {
+            $petWeight = (float) $pet->weight;
             
             $range = \App\Models\WeightRange::where('status', 'Active')
                 ->where('species_id', $pet->species_id)
@@ -120,8 +116,7 @@ class PricingService
         }
 
         // Final fallback: Use professional_fee or legacy price
-        $finalPrice = ($service->professional_fee ?? $service->price ?? 0);
-        return (float) $finalPrice * $quantity;
+        return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
     }
 
     /**
