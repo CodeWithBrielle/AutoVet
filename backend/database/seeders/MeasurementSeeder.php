@@ -16,10 +16,11 @@ class MeasurementSeeder extends Seeder
     {
         // Pet Size Categories
         $sizes = [
-            ['name' => 'Small', 'description' => 'Up to 10kg'],
-            ['name' => 'Medium', 'description' => '11kg to 25kg'],
-            ['name' => 'Large', 'description' => '26kg to 45kg'],
-            ['name' => 'Giant', 'description' => 'Over 45kg'],
+            ['name' => 'Extra Small', 'description' => 'Up to 2kg'],
+            ['name' => 'Small', 'description' => '2.01kg to 5kg'],
+            ['name' => 'Medium', 'description' => '5.01kg to 10kg'],
+            ['name' => 'Large', 'description' => '10.01kg to 25kg'],
+            ['name' => 'Giant', 'description' => 'Over 25kg'],
         ];
 
         foreach ($sizes as $size) {
@@ -28,17 +29,18 @@ class MeasurementSeeder extends Seeder
 
         // Weight Ranges
         $weightRanges = [
-            ['label' => 'Small', 'min_weight' => 0, 'max_weight' => 5],
-            ['label' => 'Medium', 'min_weight' => 6, 'max_weight' => 10],
-            ['label' => 'Large', 'min_weight' => 11, 'max_weight' => 20],
-            ['label' => 'Giant', 'min_weight' => 21, 'max_weight' => null],
+            ['label' => 'Extra Small', 'min_weight' => 0, 'max_weight' => 2],
+            ['label' => 'Small', 'min_weight' => 2.01, 'max_weight' => 5],
+            ['label' => 'Medium', 'min_weight' => 5.01, 'max_weight' => 10],
+            ['label' => 'Large', 'min_weight' => 10.01, 'max_weight' => 25],
+            ['label' => 'Giant', 'min_weight' => 25.01, 'max_weight' => null],
         ];
 
         foreach ($weightRanges as $range) {
             $category = PetSizeCategory::where('name', $range['label'])->first();
             WeightRange::updateOrCreate(
                 ['label' => $range['label']],
-                array_merge($range, ['size_category_id' => $category?->id])
+                array_merge($range, ['size_category_id' => $category?->id, 'unit' => 'kg', 'status' => 'Active'])
             );
         }
 

@@ -18,32 +18,7 @@ class PricingService
         }
 
         if ($service->pricing_type === 'fixed') {
-            return ($service->base_price ?? $service->price ?? 0) * $quantity;
-        }
-
-        if ($service->pricing_type === 'size_based' && isset($pet)) {
-            $petSizeId = $pet->size_category_id;
-            
-            if ($petSizeId) {
-                $rule = $service->pricingRules()
-                    ->where('basis_type', 'size')
-                    ->where('reference_id', $petSizeId)
-                    ->first();
-                
-                if ($rule) {
-                    return (float) $rule->price * $quantity;
-                }
-            }
-
-            // Fallback for legacy size_class
-            if ($pet->size_class) {
-                $priceRecord = $service->sizePrices()
-                    ->where('size_class', $pet->size_class)
-                    ->first();
-                if ($priceRecord) {
-                    return (float) $priceRecord->price * $quantity;
-                }
-            }
+            return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
         }
 
         if ($service->pricing_type === 'weight_based' && isset($pet) && $pet->weight !== null) {
@@ -69,8 +44,8 @@ class PricingService
             }
         }
 
-        // Final fallback: Use base_price or legacy price
-        return ($service->base_price ?? $service->price ?? 0) * $quantity;
+        // Final fallback: Use professional_fee or legacy price
+        return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
     }
 
     /**

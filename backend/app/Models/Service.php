@@ -18,7 +18,7 @@ class Service extends Model
         'pricing_mode', // Legacy
         'pricing_type',
         'measurement_basis',
-        'base_price',
+        'professional_fee',
         'category',
         'status',
         // Archive tracking

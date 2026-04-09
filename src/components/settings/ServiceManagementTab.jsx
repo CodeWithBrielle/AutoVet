@@ -11,6 +11,7 @@ export default function ServiceManagementTab() {
   const [serviceCategories, setServiceCategories] = useState([]);
   const [petSizes, setPetSizes] = useState([]);
   const [weightRanges, setWeightRanges] = useState([]);
+  const [species, setSpecies] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingService, setEditingService] = useState(null);
   const { user } = useAuth();
@@ -74,7 +75,15 @@ export default function ServiceManagementTab() {
       })
       .catch(console.error);
 
-    fetch("/api/weight-ranges", { headers })
+    fetch("/api/species", { headers })
+      .then(res => res.json())
+      .then(result => {
+        const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
+        setSpecies(normalized);
+      })
+      .catch(console.error);
+
+    fetch("/api/weight-ranges?per_page=-1", { headers })
       .then(res => res.json())
       .then(result => {
         const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
@@ -94,7 +103,7 @@ export default function ServiceManagementTab() {
         status: service.status,
         pricing_type: service.pricing_type || "fixed",
         measurement_basis: service.measurement_basis || "none",
-        base_price: service.base_price || service.price || 0,
+        professional_fee: service.professional_fee || service.price || 0,
         pricing_rules: service.pricing_rules || []
       });
     } else {
@@ -107,7 +116,7 @@ export default function ServiceManagementTab() {
         status: "Active",
         pricing_type: "fixed",
         measurement_basis: "none",
-        base_price: 0,
+        professional_fee: 0,
         pricing_rules: []
       });
     }
@@ -127,16 +136,17 @@ export default function ServiceManagementTab() {
 
     // Clean up pricing rules based on pricing_type
     let cleanedRules = [];
-    if (formData.pricing_type === 'size_based') {
-      cleanedRules = formData.pricing_rules.filter(r => r.basis_type === 'size');
-    } else if (formData.pricing_type === 'weight_based') {
-      cleanedRules = formData.pricing_rules.filter(r => r.basis_type === 'weight');
+    if (formData.pricing_type === 'weight_based') {
+      cleanedRules = formData.pricing_rules
+        .filter(r => r.basis_type === 'weight' && r.price !== "" && r.price !== null && r.price !== undefined)
+        .map(r => ({ ...r, price: Number(r.price) }));
     }
 
     const payload = { 
       ...formData, 
-      price: Number(formData.base_price || formData.price),
-      base_price: Number(formData.base_price),
+      measurement_basis: formData.pricing_type === 'weight_based' ? 'weight' : 'none',
+      price: Number(formData.professional_fee || formData.price || 0),
+      professional_fee: Number(formData.professional_fee || 0),
       pricing_rules: cleanedRules
     };
 
@@ -150,11 +160,22 @@ export default function ServiceManagementTab() {
         },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error("Failed to save service");
+      
+      const result = await res.json();
+
+      if (!res.ok) {
+        console.error("SERVICE SAVE ERROR:", result);
+        const errorMsg = result.errors 
+          ? Object.values(result.errors).flat().join(", ") 
+          : (result.message || "Failed to save service");
+        throw new Error(errorMsg);
+      }
+
       toast.success(isEditing ? "Service updated" : "Service created");
       fetchServices();
       handleCloseModal();
     } catch (err) {
+      console.error("CATCH ERROR:", err);
       toast.error(err.message);
     }
   };
@@ -199,29 +220,57 @@ export default function ServiceManagementTab() {
               <th className="px-4 py-3">Service Name</th>
               <th className="px-4 py-3">Category</th>
               <th className="px-4 py-3">Pricing Mode</th>
-              <th className="px-4 py-3">Base Price</th>
-              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Professional Fee / Pricing Rule</th>
+              <th className="px-4 py-3 text-center">Status</th>
               <th className="px-4 py-3">Action</th>
             </tr>
           </thead>
           <tbody>
             {services.map((svc) => (
-              <tr key={svc.id} className="border-b border-slate-200/80 dark:border-dark-border">
+              <tr key={svc.id} className="border-b border-slate-200/80 dark:border-dark-border group hover:bg-slate-50/50 dark:hover:bg-dark-surface/50 transition-colors">
                 <td className="px-4 py-4">
-                  <p className="text-sm font-medium text-slate-900 dark:text-zinc-50">{svc.name}</p>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400 truncate max-w-[200px]">{svc.description}</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-zinc-50">{svc.name}</p>
+                  <p className="max-w-[180px] truncate text-xs text-slate-500 dark:text-zinc-400">{svc.description}</p>
                 </td>
-                <td className="px-4 py-4 text-sm text-slate-700 dark:text-zinc-300">{svc.category || "-"}</td>
+                <td className="px-4 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                  {svc.category || "Uncategorized"}
+                </td>
                 <td className="px-4 py-4">
-                  <span className="capitalize text-xs font-medium text-slate-600 dark:text-zinc-400 bg-slate-100 dark:bg-dark-surface px-2 py-1 rounded">
+                  <span className={clsx(
+                    "rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-tight shadow-sm",
+                    svc.pricing_type === 'weight_based' ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" :
+                    "bg-slate-100 text-slate-700 dark:bg-dark-surface dark:text-zinc-400"
+                  )}>
                     {svc.pricing_type?.replace('_', ' ') || 'Fixed'}
                   </span>
                 </td>
-                <td className="px-4 py-4 text-sm font-semibold text-slate-900 dark:text-zinc-50">₱{Number(svc.base_price || svc.price).toFixed(2)}</td>
                 <td className="px-4 py-4">
+                  {svc.pricing_type === 'fixed' || !svc.pricing_type ? (
+                    <p className="text-sm font-bold text-slate-900 dark:text-zinc-50">
+                      ₱{Number(svc.base_price || svc.price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                      <span className="ml-1.5 text-[10px] font-normal text-slate-400 dark:text-zinc-500">Professional Fee</span>
+                    </p>
+                  ) : (
+                    <div>
+                        {svc.pricing_rules && svc.pricing_rules.length > 0 ? (
+                           <p className="flex items-center gap-1.5 text-sm font-bold text-blue-600 dark:text-blue-400">
+                              <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                              {svc.pricing_rules.length} Weight Brackets
+                              <span className="text-[10px] font-normal text-slate-400 dark:text-zinc-500">Configured</span>
+                           </p>
+                        ) : (
+                           <div className="flex items-center gap-1.5 text-sm font-bold text-rose-500">
+                              <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                              No Pricing Rules Set
+                           </div>
+                        )}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-4 text-center">
                   <span
                     className={clsx(
-                      "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                      "inline-flex rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider",
                       svc.status === "Active"
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
                         : "border-slate-200 bg-slate-100 text-slate-600 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-400"
@@ -232,11 +281,11 @@ export default function ServiceManagementTab() {
                 </td>
                 <td className="px-4 py-4">
                   <div className="flex items-center gap-2">
-                    <button onClick={() => handleOpenModal(svc)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-dark-border dark:text-zinc-400 dark:hover:bg-dark-surface hover:bg-slate-100">
-                      Edit
+                    <button onClick={() => handleOpenModal(svc)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 transition-colors dark:bg-dark-card dark:border-dark-border dark:text-zinc-400 dark:hover:bg-dark-surface">
+                      <FiEdit2 size={14} />
                     </button>
-                    <button onClick={() => handleDelete(svc.id)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:border-rose-900/40 dark:text-rose-400 dark:hover:bg-rose-900/30 hover:bg-rose-50">
-                      <FiTrash2 className="h-3.5 w-3.5" />
+                    <button onClick={() => handleDelete(svc.id)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 transition-colors dark:bg-dark-card dark:border-rose-900/40 dark:text-rose-400 dark:hover:bg-rose-900/30">
+                      <FiTrash2 size={14} />
                     </button>
                   </div>
                 </td>
@@ -252,140 +301,211 @@ export default function ServiceManagementTab() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-dark-card border dark:border-dark-border">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-zinc-50">{editingService ? "Edit Service" : "Add Service"}</h3>
-              <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300"><FiX size={20}/></button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-4xl rounded-3xl bg-white shadow-2xl dark:bg-dark-card border border-slate-200 dark:border-dark-border overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-dark-border bg-slate-50/50 dark:bg-dark-surface/30">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-zinc-50">{editingService ? "Update Service Details" : "Configure New Service"}</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Define service name, type, and species-specific pricing rules.</p>
+              </div>
+              <button 
+                onClick={handleCloseModal} 
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-white dark:bg-dark-surface text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all border border-slate-200 dark:border-dark-border shadow-sm"
+              >
+                <FiX size={20}/>
+              </button>
             </div>
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Service Name *</label>
-                <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" />
+            
+            <form onSubmit={handleSave} className="p-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 divide-x divide-slate-100 dark:divide-dark-border">
+                {/* Left Column: Basic Info */}
+                <div className="p-8 space-y-6">
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-500">General Information</h4>
+                    
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Service Name *</label>
+                      <input 
+                        required 
+                        type="text" 
+                        placeholder="e.g. Full Grooming (Large)"
+                        value={formData.name} 
+                        onChange={e => setFormData({...formData, name: e.target.value})} 
+                        className="w-full rounded-2xl border border-slate-200 p-3 text-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white transition-all" 
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Service Category</label>
+                      <select 
+                        required
+                        value={formData.category} 
+                        onChange={e => setFormData({...formData, category: e.target.value})} 
+                        className="w-full rounded-2xl border border-slate-200 p-3 text-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white appearance-none"
+                      >
+                        <option value="">Select Category</option>
+                        {serviceCategories.map(c => (
+                          <option key={c.id || c} value={c.name || c}>{c.name || c}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Description</label>
+                      <textarea 
+                        rows="3" 
+                        placeholder="Detailed service explanation..."
+                        value={formData.description} 
+                        onChange={e => setFormData({...formData, description: e.target.value})} 
+                        className="w-full rounded-2xl border border-slate-200 p-3 text-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white transition-all resize-none" 
+                      />
+                    </div>
+
+                    <div className="pt-2">
+                      <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Service Status</label>
+                      <div className="flex gap-4">
+                        {['Active', 'Inactive'].map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setFormData({...formData, status: s})}
+                            className={clsx(
+                              "flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all",
+                              formData.status === s 
+                                ? "bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-400"
+                                : "bg-white border-slate-200 text-slate-500 dark:bg-dark-surface dark:border-dark-border"
+                            )}
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Pricing Rules */}
+                <div className="bg-slate-50/50 dark:bg-dark-surface/20 p-8 space-y-6">
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-500">Pricing Model</h4>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Mode</label>
+                        <select 
+                          value={formData.pricing_type} 
+                          onChange={e => {
+                            const type = e.target.value;
+                            let basis = 'none';
+                            if (type === 'weight_based') basis = 'weight';
+                            setFormData({...formData, pricing_type: type, measurement_basis: basis});
+                          }}
+                          className="w-full rounded-2xl border border-slate-200 p-3 text-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white"
+                        >
+                          <option value="fixed">Fixed Price</option>
+                          <option value="weight_based">Weight Based</option>
+                        </select>
+                      </div>
+
+                      {formData.pricing_type === 'fixed' && (
+                        <div>
+                          <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Professional Fee (₱)</label>
+                          <div className="relative">
+                             <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">₱</span>
+                             <input 
+                              required 
+                              min="0" 
+                              step="0.01" 
+                              type="number" 
+                              value={formData.professional_fee || formData.price} 
+                              onChange={e => setFormData({...formData, professional_fee: e.target.value, price: e.target.value})} 
+                              className="w-full rounded-2xl border border-slate-200 p-3 pl-8 text-sm font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" 
+                             />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {formData.pricing_type === 'weight_based' && (
+                      <div className="space-y-6 pt-2">
+                        <div className="flex items-center justify-between">
+                           <h5 className="text-sm font-bold text-slate-800 dark:text-zinc-200">Species-Specific Brackets</h5>
+                           <span className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider">Automated Mapping</span>
+                        </div>
+
+                        <div className="space-y-8 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                           {species.filter(s => weightRanges.some(r => r.species_id === s.id)).map(sp => (
+                              <div key={sp.id} className="space-y-4">
+                                 <div className="flex items-center gap-3 border-l-4 border-blue-500 pl-3">
+                                    <h6 className="text-sm font-bold text-slate-900 dark:text-zinc-100">{sp.name}</h6>
+                                    <div className="h-px flex-1 bg-slate-200 dark:bg-dark-border" />
+                                 </div>
+                                 
+                                 <div className="grid gap-3">
+                                    {weightRanges.filter(r => r.species_id === sp.id).map(range => {
+                                      const rule = formData.pricing_rules.find(r => r.basis_type === 'weight' && r.reference_id === range.id);
+                                      return (
+                                        <div key={range.id} className="group flex items-center justify-between gap-4 p-3 rounded-2xl bg-white dark:bg-dark-card border border-slate-100 dark:border-dark-border hover:shadow-md transition-all">
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-bold text-slate-800 dark:text-zinc-100 truncate">{range.label}</p>
+                                            <p className="text-[10px] text-slate-500 font-medium">{range.min_weight}-{range.max_weight || '∞'} {range.unit}</p>
+                                          </div>
+                                          <div className="relative w-32">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">₱</span>
+                                            <input 
+                                              type="number" 
+                                              required 
+                                              placeholder="0.00"
+                                              value={rule?.price || ""} 
+                                              onChange={e => {
+                                                const newPrice = e.target.value;
+                                                const otherRules = formData.pricing_rules.filter(r => !(r.basis_type === 'weight' && r.reference_id === range.id));
+                                                setFormData({
+                                                  ...formData, 
+                                                  pricing_rules: [...otherRules, { basis_type: 'weight', reference_id: range.id, price: newPrice }]
+                                                });
+                                              }}
+                                              className="w-full rounded-xl border border-slate-100 dark:bg-dark-surface dark:border-dark-border py-2.5 pl-7 pr-3 text-sm font-bold text-slate-900 dark:text-zinc-50 focus:border-blue-500 focus:outline-none transition-all" 
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                 </div>
+                              </div>
+                           ))}
+
+                           {species.length === 0 && (
+                             <div className="text-center py-10 bg-slate-100/50 dark:bg-dark-surface/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-dark-border">
+                               <p className="text-sm font-medium text-slate-500">No Weight Ranges configurated in system master data.</p>
+                             </div>
+                           )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Description</label>
-                <textarea rows="2" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className={formData.pricing_type === 'fixed' ? 'col-span-1' : 'col-span-2'}>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Pricing Type</label>
-                  <select 
-                    value={formData.pricing_type} 
-                    onChange={e => {
-                      const type = e.target.value;
-                      let basis = 'none';
-                      if (type === 'size_based') basis = 'size';
-                      if (type === 'weight_based') basis = 'weight';
-                      setFormData({...formData, pricing_type: type, measurement_basis: basis});
-                    }}
-                    className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white"
+
+              {/* Bottom fixed footer */}
+              <div className="flex items-center justify-between gap-3 p-6 border-t border-slate-100 dark:border-dark-border bg-white dark:bg-dark-card">
+                <p className="text-xs text-slate-400 italic">Ensure all required fields Marked with (*) are completed before saving.</p>
+                <div className="flex gap-3">
+                  <button 
+                    type="button" 
+                    onClick={handleCloseModal} 
+                    className="px-6 py-2.5 rounded-xl font-bold text-slate-600 hover:text-slate-900 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-dark-surface transition-all"
                   >
-                    <option value="fixed">Fixed Price</option>
-                    <option value="size_based">Size Based</option>
-                    <option value="weight_based">Weight Based</option>
-                  </select>
+                    Discard Changes
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex items-center gap-2 rounded-xl bg-blue-600 px-8 py-2.5 font-bold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700 hover:shadow-blue-700/30 transition-all"
+                  >
+                    <FiSave/> 
+                    Save Service
+                  </button>
                 </div>
-                {formData.pricing_type === 'fixed' && (
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Base Price (₱) *</label>
-                    <input required min="0" step="0.01" type="number" value={formData.base_price || formData.price} onChange={e => setFormData({...formData, base_price: e.target.value, price: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" />
-                  </div>
-                )}
-              </div>
-
-              {formData.pricing_type === 'size_based' && (
-                <div className="mt-4 border-t pt-4 dark:border-dark-border bg-slate-50/50 dark:bg-dark-surface/50 p-3 rounded-xl">
-                  <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-3">Size-based Pricing</p>
-                  <div className="space-y-3 max-h-40 overflow-y-auto pr-2">
-                    {petSizes.map(size => {
-                      const rule = formData.pricing_rules.find(r => r.basis_type === 'size' && r.reference_id === size.id);
-                      return (
-                        <div key={size.id} className="flex items-center justify-between gap-4">
-                          <span className="text-sm text-slate-600 dark:text-zinc-400">{size.name}</span>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs text-sm">₱</span>
-                            <input 
-                              type="number" 
-                              required 
-                              placeholder="0.00"
-                              value={rule?.price || ""} 
-                              onChange={e => {
-                                const newPrice = e.target.value;
-                                const otherRules = formData.pricing_rules.filter(r => !(r.basis_type === 'size' && r.reference_id === size.id));
-                                setFormData({
-                                  ...formData, 
-                                  pricing_rules: [...otherRules, { basis_type: 'size', reference_id: size.id, price: newPrice }]
-                                });
-                              }}
-                              className="w-32 rounded-xl border border-slate-200 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" 
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {petSizes.length === 0 && <p className="text-xs text-rose-500">No size categories defined. Please add them in MDM first.</p>}
-                  </div>
-                </div>
-              )}
-
-              {formData.pricing_type === 'weight_based' && (
-                <div className="mt-4 border-t pt-4 dark:border-dark-border bg-slate-50/50 dark:bg-dark-surface/50 p-3 rounded-xl">
-                  <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-3">Weight-based Pricing</p>
-                  <div className="space-y-3 max-h-40 overflow-y-auto pr-2">
-                    {weightRanges.map(range => {
-                      const rule = formData.pricing_rules.find(r => r.basis_type === 'weight' && r.reference_id === range.id);
-                      return (
-                        <div key={range.id} className="flex items-center justify-between gap-4">
-                          <span className="text-sm text-slate-600 dark:text-zinc-400">{range.label} ({range.min_weight}-{range.max_weight || '∞'} {range.unit})</span>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs text-sm">₱</span>
-                            <input 
-                              type="number" 
-                              required 
-                              placeholder="0.00"
-                              value={rule?.price || ""} 
-                              onChange={e => {
-                                const newPrice = e.target.value;
-                                const otherRules = formData.pricing_rules.filter(r => !(r.basis_type === 'weight' && r.reference_id === range.id));
-                                setFormData({
-                                  ...formData, 
-                                  pricing_rules: [...otherRules, { basis_type: 'weight', reference_id: range.id, price: newPrice }]
-                                });
-                              }}
-                              className="w-32 rounded-xl border border-slate-200 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white" 
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {weightRanges.length === 0 && <p className="text-xs text-rose-500">No weight ranges defined. Please add them in MDM first.</p>}
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Category</label>
-                  <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white">
-                    <option value="">Select Category</option>
-                    {serviceCategories.map(c => (
-                      <option key={c.id || c} value={c.name || c}>{c.name || c}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-1">Status</label>
-                <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white">
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
-              
-              <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-dark-border">
-                <button type="button" onClick={handleCloseModal} className="px-4 py-2 font-semibold text-slate-600 hover:text-slate-800 dark:text-zinc-300">Cancel</button>
-                <button type="submit" className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700"><FiSave/> Save</button>
               </div>
             </form>
           </div>

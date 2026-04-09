@@ -357,11 +357,6 @@ function InvoiceModuleView() {
   }, [services, inventory, serviceInput]);
 
   const calculateDynamicPrice = (service) => {
-    if (service.pricing_type === "size_based" && patientDetails?.size_category_id) {
-      const rule = service.pricing_rules?.find(r => r.basis_type === 'size' && r.reference_id === patientDetails.size_category_id);
-      if (rule) return Number(rule.price);
-    }
-    
     if (service.pricing_type === "weight_based" && patientDetails?.weight !== null) {
       const petWeight = Number(patientDetails.weight);
       const range = weightRanges.find(r => 
@@ -374,7 +369,7 @@ function InvoiceModuleView() {
       }
     }
 
-    return Number(service.base_price || service.price) || 0;
+    return Number(service.professional_fee || service.price) || 0;
   };
 
   const selectItemFromDropdown = (item) => {
@@ -382,7 +377,7 @@ function InvoiceModuleView() {
     if (item.type === 'service') {
       setPriceInput(calculateDynamicPrice(item));
     } else {
-      setPriceInput(item.selling_price || item.price || 0);
+      setPriceInput(item.selling_price ?? 0);
     }
     setSelectedService(item);
     setIsDropdownOpen(false);
@@ -404,7 +399,7 @@ function InvoiceModuleView() {
     // Check inventory
     const matchedInv = inventory.find(i => i.item_name.toLowerCase() === val.toLowerCase() && i.is_billable);
     if (matchedInv) {
-      setPriceInput(matchedInv.selling_price || 0);
+      setPriceInput(matchedInv.selling_price ?? 0);
       setSelectedService({ ...matchedInv, name: matchedInv.item_name, type: 'inventory' });
       return;
     }
@@ -423,9 +418,7 @@ function InvoiceModuleView() {
     let serviceId = itemType === 'service' ? selectedService?.id : null;
     let inventoryId = itemType === 'inventory' ? selectedService?.id : null;
 
-    if (itemType === 'service' && selectedService?.pricing_type === "size_based" && patientDetails?.size_category_id) {
-       itemName = `${serviceInput} (${patientDetails.size_category?.name || 'Selected Size'})`;
-    } else if (itemType === 'service' && selectedService?.pricing_type === "weight_based" && patientDetails?.weight !== null) {
+    if (itemType === 'service' && selectedService?.pricing_type === "weight_based" && patientDetails?.weight !== null) {
        itemName = `${serviceInput} (${patientDetails.weight}kg)`;
     }
       

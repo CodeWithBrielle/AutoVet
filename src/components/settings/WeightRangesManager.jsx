@@ -362,15 +362,37 @@ export default function WeightRangesManager() {
             <form onSubmit={handleSave} className="space-y-5">
               <div className="grid grid-cols-1 gap-5">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Label</label>
-                  <input 
+                  <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Label / Tier</label>
+                  <select 
                     required
-                    type="text" 
-                    placeholder="e.g. Small, Medium"
                     value={formData.label} 
-                    onChange={e => setFormData({ ...formData, label: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white"
-                  />
+                    onChange={e => {
+                        const val = e.target.value;
+                        let min = 0;
+                        let max = "";
+                        // Auto-fill suggested ranges based on standard labels
+                        if (val === "Extra Small") { min = 0; max = 2; }
+                        else if (val === "Small") { min = 2.01; max = 5; }
+                        else if (val === "Medium") { min = 5.01; max = 10; }
+                        else if (val === "Large") { min = 10.01; max = 25; }
+                        else if (val === "Giant") { min = 25.01; max = ""; }
+                        
+                        setFormData({ 
+                            ...formData, 
+                            label: val,
+                            min_weight: min,
+                            max_weight: max
+                        });
+                    }}
+                    className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none dark:bg-dark-surface dark:border-dark-border dark:text-white appearance-none"
+                  >
+                    <option value="">Select standard tier...</option>
+                    <option value="Extra Small">Extra Small (Up to 2kg)</option>
+                    <option value="Small">Small (2.01kg - 5kg)</option>
+                    <option value="Medium">Medium (5.01kg - 10kg)</option>
+                    <option value="Large">Large (10.01kg - 25kg)</option>
+                    <option value="Giant">Giant (25.01kg +)</option>
+                  </select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">

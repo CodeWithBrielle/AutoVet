@@ -249,7 +249,11 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
                   </p>
                 ) : (field === "price" || field === "selling_price") ? (
                   <p className="font-semibold text-slate-800 dark:text-zinc-200">
-                    ₱{Number(product[field] || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {field === "selling_price" && Number(product[field] ?? 0) === 0 ? (
+                       <span className="text-sm text-slate-500 font-medium">Internal Use Only</span>
+                    ) : (
+                       `₱${Number(product[field] ?? 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    )}
                   </p>
                 ) : (field === "stock_level" || field === "min_stock_level") ? (
                   <p className="font-semibold text-slate-800 dark:text-zinc-200">{Number(product[field] || 0).toLocaleString()} units</p>
