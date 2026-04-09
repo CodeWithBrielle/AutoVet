@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { FiX, FiCheckCircle, FiInfo, FiCheck } from "react-icons/fi";
+import { LuSparkles } from "react-icons/lu";
 import { useToast } from "../../context/ToastContext";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
@@ -16,11 +17,12 @@ const inventorySchema = z.object({
   unit: z.string().min(1, "Unit is required"),
   min_stock_level: z.coerce.number().min(0, "Alert threshold must be 0 or more"),
   
-  price: z.coerce.number().min(0, "Price must be 0 or more").optional().or(z.literal("")),
+  price: z.coerce.number().min(0, "Price must be 0 or more").optional().or(z.literal("")), // Legacy field?
+  cost_price: z.coerce.number().min(0, "Cost price must be 0 or more").optional().or(z.literal("")),
   selling_price: z.coerce.number().min(0, "Selling price is required").optional().or(z.literal("")),
   
-  is_billable: z.boolean().default(true),
-  is_consumable: z.boolean().default(false),
+  is_sellable: z.boolean().default(true),
+  is_service_usable: z.boolean().default(false),
   deduct_on_finalize: z.boolean().default(true),
   track_expiration: z.boolean().default(false),
   expiration_date: z.string().optional().or(z.literal("")),
@@ -38,10 +40,20 @@ const inventorySchema = z.object({
       code: z.ZodIssueCode.custom,
     });
   }
-  if (data.selling_price === "" || data.selling_price === undefined || data.selling_price === null) {
+  
+  // Custom logic for price requirements based on usage and category
+  // (We'll handle category-specific logic here if we had category names, 
+  // but for now let's use the core usage flags. Category names are resolved in the component)
+  if (!data.selling_price && data.selling_price !== 0 && (data.is_sellable || data.is_service_usable)) {
+      // NOTE: We permit 0 as a valid price. empty string or undefined is invalid for billable items.
+      // However, for consumables/supplies we might want to skip this requirement.
+      // The component state determines if we should enforce this.
+  }
+
+  if (!data.is_sellable && !data.is_service_usable) {
       ctx.addIssue({
-          path: ["selling_price"],
-          message: "Selling price is required",
+          path: ["is_sellable"],
+          message: "Select at least one: Sellable or Service-Usable",
           code: z.ZodIssueCode.custom
       });
   }
@@ -69,10 +81,10 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
       stock_level: 0,
       unit: "",
       min_stock_level: 10,
-      price: "",
+      cost_price: "",
       selling_price: "",
-      is_billable: true,
-      is_consumable: false,
+      is_sellable: true,
+      is_service_usable: false,
       deduct_on_finalize: true,
       track_expiration: false,
       expiration_date: "",
@@ -87,8 +99,8 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
   const watchTrackExpiration = watch("track_expiration");
   const initialStock = watch("stock_level") || 0;
   const alertThreshold = watch("min_stock_level") || 0;
-  const watchBillable = watch("is_billable");
-  const watchConsumable = watch("is_consumable");
+  const watchSellable = watch("is_sellable");
+  const watchServiceUsable = watch("is_service_usable");
   const watchAutoDeduct = watch("deduct_on_finalize");
 
   useEffect(() => {
@@ -124,20 +136,33 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
         if (name.includes("vaccin")) {
           setValue("unit", "dose");
           setValue("track_expiration", true);
-          setValue("is_billable", true);
-          setValue("is_consumable", true);
+          setValue("is_sellable", false);
+          setValue("is_service_usable", true);
           setValue("deduct_on_finalize", true);
         } else if (name.includes("medicin")) {
           setValue("track_expiration", true);
+          setValue("is_service_usable", true);
+        } else if (name.includes("consumable")) {
+          setValue("is_sellable", false);
+          setValue("is_service_usable", true);
+          setValue("selling_price", 0);
+          setSellingPriceDisplay("0.00");
         } else if (name.includes("supplies")) {
           setValue("track_expiration", false);
-        } else if (name.includes("retail")) {
-          setValue("is_billable", true);
-          setValue("deduct_on_finalize", true);
+          setValue("is_service_usable", true);
         }
       }
     }
   }, [watchCategory, categoryOptions, setValue]);
+
+  useEffect(() => {
+    // Only reset if NOT sellable AND NOT service-usable
+    // But if it's a vaccine/medicine (service usable), we KEEP the price.
+    if (!watchSellable && !watchServiceUsable) {
+      setValue("selling_price", null);
+      setSellingPriceDisplay("");
+    }
+  }, [watchSellable, watchServiceUsable, setValue]);
 
   let stockStatus = "Out of Stock";
   let stockStatusColor = "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400";
@@ -374,15 +399,19 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
                         setValue("selling_price", raw === "" ? "" : parseFloat(raw), { shouldValidate: true });
                       }
                     }}
-                    className={getInputClass(errors.selling_price)}
-                    placeholder="0.00"
+                    disabled={!watchSellable && !watchServiceUsable}
+                    className={clsx(
+                      getInputClass(errors.selling_price),
+                      (!watchSellable && !watchServiceUsable) && "opacity-50 cursor-not-allowed bg-slate-100 dark:bg-dark-surface/50"
+                    )}
+                    placeholder={(watchSellable || watchServiceUsable) ? "0.00" : "N/A"}
                   />
                   {errors.selling_price && <p className="mt-1 text-xs text-red-500">{errors.selling_price.message}</p>}
                 </div>
 
                 <div>
                   <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    Cost Price (₱)
+                    Cost Price (₱) *
                   </label>
                   <input
                     type="text"
@@ -391,55 +420,68 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
                       let raw = e.target.value.replace(/,/g, "");
                       if (/^\d*\.?\d*$/.test(raw)) {
                         setCostPriceDisplay(raw ? raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : "");
-                        setValue("price", raw === "" ? "" : parseFloat(raw), { shouldValidate: true });
+                        setValue("cost_price", raw === "" ? "" : parseFloat(raw), { shouldValidate: true });
+                        setValue("price", raw === "" ? "" : parseFloat(raw)); // Compat
                       }
                     }}
-                    className={getInputClass(errors.price)}
-                    placeholder="Optional"
+                    className={getInputClass(errors.cost_price)}
+                    placeholder="0.00"
                   />
+                  {errors.cost_price && <p className="mt-1 text-xs text-red-500">{errors.cost_price.message}</p>}
                 </div>
               </div>
 
-              <SectionHeading>D. Usage Settings</SectionHeading>
+              <SectionHeading>D. Usage Configuration</SectionHeading>
               <p className="mb-4 text-xs text-slate-500 dark:text-zinc-400">
-                Determines how the item interacts with invoices and treatments.
+                Define the primary purpose of this item in the clinic.
               </p>
               
               <div className="space-y-3">
                 <label className={clsx(
                   "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
-                  watchBillable ? "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
+                  watchSellable ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
                 )}>
                   <div className="mt-0.5">
                     <input
                       type="checkbox"
-                      {...register("is_billable")}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                      {...register("is_sellable")}
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                     />
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Billable</span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Item appears on client invoices</span>
+                    <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Sellable to Customers</span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Item appears in retail/product sale search results</span>
                   </div>
                 </label>
 
                 <label className={clsx(
                   "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
-                  watchConsumable ? "border-indigo-200 bg-indigo-50 dark:border-indigo-900/40 dark:bg-indigo-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
+                  watchServiceUsable ? "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
                 )}>
                   <div className="mt-0.5">
                     <input
                       type="checkbox"
-                      {...register("is_consumable")}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                      {...register("is_service_usable")}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Consumable</span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Item is consumed during treatments</span>
+                    <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Usable in Services/Treatments</span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Item can be linked to service setup and treatments</span>
                   </div>
                 </label>
 
+                {watchSellable && watchServiceUsable && (
+                  <div className="flex items-center gap-2 px-3 py-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 rounded-lg animate-in fade-in zoom-in duration-300">
+                     <LuSparkles className="h-3 w-3 text-amber-500" />
+                     <span className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400">Dual Purpose Item</span>
+                  </div>
+                )}
+              </div>
+
+              <SectionHeading>E. Inventory Logic</SectionHeading>
+              
+              <div className="space-y-3">
                 <label className={clsx(
                   "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
                   watchAutoDeduct ? "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
