@@ -9,6 +9,74 @@ use App\Models\ServicePrice;
 class PricingService
 {
     /**
+     * Generate a complete billing breakdown for a service.
+     */
+    public function generateBillingBreakdown(Service $service, ?Pet $pet = null, float $quantity = 1, ?float $weight = null): array
+    {
+        $professionalFee = $this->calculatePrice($service, $pet, 1, null, $weight);
+        
+        $serviceLine = [
+            'name' => $service->name . " - Professional Fee",
+            'type' => 'service',
+            'line_type' => 'service',
+            'reference_type' => Service::class,
+            'reference_id' => $service->id,
+            'qty' => $quantity,
+            'unit_price' => $professionalFee,
+            'total' => $professionalFee * $quantity,
+            'is_billable' => true,
+        ];
+
+        $itemLines = [];
+        $subtotal = $serviceLine['total'];
+
+        // Add linked consumables/items
+        if ($service->auto_load_linked_items) {
+            $consumables = $service->consumables()->with('inventory')->get();
+            foreach ($consumables as $consumable) {
+                $unitPrice = $consumable->is_billable ? (float) ($consumable->inventory->selling_price ?? 0) : 0;
+                $lineQty = $consumable->quantity * $quantity;
+                $lineTotal = $unitPrice * $lineQty;
+
+                $itemLines[] = [
+                    'name' => $consumable->inventory->name ?? 'Unknown Item',
+                    'type' => 'item',
+                    'line_type' => 'item',
+                    'reference_type' => \App\Models\Inventory::class,
+                    'reference_id' => $consumable->inventory_id,
+                    'qty' => $lineQty,
+                    'unit_price' => $unitPrice,
+                    'total' => $lineTotal,
+                    'is_billable' => $consumable->is_billable,
+                    'metadata' => [
+                        'auto_loaded' => true,
+                        'is_required' => $consumable->is_required,
+                    ]
+                ];
+
+                if ($consumable->is_billable) {
+                    $subtotal += $lineTotal;
+                }
+            }
+        }
+
+        // Tax Calculation (Fixed 12% VAT as per current system requirement)
+        $taxRate = 12.00;
+        $taxAmount = round($subtotal * ($taxRate / 100), 2);
+        $grandTotal = $subtotal + $taxAmount;
+
+        return [
+            'professional_fee' => $professionalFee,
+            'service_line' => $serviceLine,
+            'item_lines' => $itemLines,
+            'subtotal' => $subtotal,
+            'tax_rate' => $taxRate,
+            'tax_amount' => $taxAmount,
+            'grand_total' => $grandTotal,
+        ];
+    }
+
+    /**
      * Calculate the price for a service given a pet.
      */
     public function calculatePrice(Service $service, ?Pet $pet = null, float $quantity = 1, ?float $manualPrice = null, ?float $weight = null): float
@@ -18,7 +86,7 @@ class PricingService
         }
 
         if ($service->pricing_type === 'fixed') {
-            return ($service->base_price ?? $service->price ?? 0) * $quantity;
+            return (float) ($service->professional_fee ?? $service->price ?? 0) * $quantity;
         }
 
         if ($service->pricing_type === 'size_based' && isset($pet)) {
@@ -37,7 +105,7 @@ class PricingService
 
             // Fallback for legacy size_class
             if ($pet->size_class) {
-                $priceRecord = $service->sizePrices()
+                $priceRecord = $service->sizePrices() // Note: sizePrices might be legacy too
                     ->where('size_class', $pet->size_class)
                     ->first();
                 if ($priceRecord) {
@@ -78,8 +146,40 @@ class PricingService
             throw new \Exception("No pricing rule configured for weight '{$petWeight}kg' (Species: {$pet->species_id}) for service '{$service->name}'.");
         }
 
-        // Final fallback: Use base_price or legacy price
-        $finalPrice = ($service->base_price ?? $service->price ?? 0);
+        if ($service->pricing_type === 'rule_based' && isset($pet)) {
+            $petWeight = $weight ?? (float) $pet->weight;
+            
+            $rule = $service->pricingRules()
+                ->where('basis_type', 'rule')
+                ->where(function ($q) use ($pet, $petWeight) {
+                    $q->where(function ($sq) use ($pet) {
+                        $sq->whereNull('species_id')->orWhere('species_id', $pet->species_id);
+                    })
+                    ->where(function ($sq) use ($pet) {
+                        $sq->whereNull('breed_id')->orWhere('breed_id', $pet->breed_id);
+                    })
+                    ->where(function ($sq) use ($petWeight) {
+                        $sq->whereNull('min_weight')->orWhere('min_weight', '<=', $petWeight);
+                    })
+                    ->where(function ($sq) use ($petWeight) {
+                        $sq->whereNull('max_weight')->orWhere('max_weight', '>=', $petWeight);
+                    })
+                    ->where(function ($sq) use ($pet) {
+                        $sq->whereNull('size_category_id')->orWhere('size_category_id', $pet->size_category_id);
+                    });
+                })
+                ->orderBy('id', 'asc')
+                ->first();
+
+            if ($rule) {
+                return (float) $rule->price * $quantity;
+            }
+
+            throw new \Exception("No specific pricing rule matched for service '{$service->name}'.");
+        }
+
+        // Final fallback: Use professional_fee or legacy price
+        $finalPrice = ($service->professional_fee ?? $service->price ?? 0);
         return (float) $finalPrice * $quantity;
     }
 
@@ -92,9 +192,12 @@ class PricingService
             return true;
         }
 
-        $expectedPrice = $this->calculatePrice($service, $pet);
-        
-        // Allow for minor floating point differences if any, or strict equality
-        return abs($expectedPrice - $submittedUnitPrice) < 0.01;
+        try {
+            $expectedPrice = $this->calculatePrice($service, $pet);
+            // Allow for minor floating point differences if any, or strict equality
+            return abs($expectedPrice - $submittedUnitPrice) < 0.01;
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 }

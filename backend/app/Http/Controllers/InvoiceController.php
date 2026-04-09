@@ -26,6 +26,34 @@ class InvoiceController extends Controller
     }
 
     /**
+     * Resolve billing breakdown for a specific service and pet.
+     */
+    public function resolveBreakdown(Request $request)
+    {
+        $validated = $request->validate([
+            'service_id' => 'required|exists:services,id',
+            'pet_id' => 'nullable|exists:pets,id',
+            'qty' => 'required|numeric|min:1',
+            'weight' => 'nullable|numeric|min:0',
+        ]);
+
+        $service = \App\Models\Service::findOrFail($validated['service_id']);
+        $pet = $validated['pet_id'] ? \App\Models\Pet::find($validated['pet_id']) : null;
+
+        try {
+            $breakdown = $this->pricingService->generateBillingBreakdown(
+                $service, 
+                $pet, 
+                (float) $validated['qty'], 
+                $validated['weight'] ? (float) $validated['weight'] : null
+            );
+            return response()->json($breakdown);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
      * Display a listing of invoices.
      */
     public function index()
@@ -54,13 +82,19 @@ class InvoiceController extends Controller
             'notes_to_client' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_type' => 'required|in:service,inventory',
+            'items.*.line_type' => 'nullable|in:service,item,adjustment',
             'items.*.name' => 'required|string',
             'items.*.notes' => 'nullable|string',
-            'items.*.qty' => 'required|integer|min:1',
+            'items.*.qty' => 'required|numeric|min:0.01',
             'items.*.unit_price' => 'required|numeric|min:0',
             'items.*.amount' => 'required|numeric|min:0',
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
+            'items.*.is_hidden' => 'sometimes|boolean',
+            'items.*.is_billable' => 'sometimes|boolean',
+            'items.*.unit_price_snapshot' => 'nullable|numeric',
+            'items.*.line_total_snapshot' => 'nullable|numeric',
+            'items.*.metadata_snapshot' => 'nullable|array',
         ]);
 
         if ($validated['discount_value'] > $validated['subtotal'] && $validated['discount_type'] === 'fixed') {
@@ -69,6 +103,16 @@ class InvoiceController extends Controller
         
         if ($validated['status'] === 'Finalized' && $validated['subtotal'] <= 0) {
             throw ValidationException::withMessages(['subtotal' => 'Cannot finalize an invoice with 0 subtotal.']);
+        }
+
+        if (!empty($validated['appointment_id'])) {
+            $appt = \App\Models\Appointment::find($validated['appointment_id']);
+            if ($appt && $appt->pet_id != $validated['pet_id']) {
+                throw ValidationException::withMessages([
+                    'pet_id' => 'The selected pet does not match the appointment record.',
+                    'appointment_id' => 'This appointment belongs to a different pet.'
+                ]);
+            }
         }
 
         DB::beginTransaction();
@@ -90,6 +134,7 @@ class InvoiceController extends Controller
             $itemsToCreate = [];
 
             foreach ($validated['items'] as $itemData) {
+                // Determine source-of-truth unit price and capture snapshot
                 if ($itemData['item_type'] === 'service') {
                     $service = \App\Models\Service::find($itemData['service_id']);
                     if ($service && $service->pricing_mode !== 'manual') {
@@ -99,34 +144,36 @@ class InvoiceController extends Controller
                              throw ValidationException::withMessages(['items' => $e->getMessage()]);
                         }
                     }
+                    $itemData['line_type'] = 'service';
+                    $itemData['reference_type'] = \App\Models\Service::class;
+                    $itemData['reference_id'] = $itemData['service_id'];
                 } else if ($itemData['item_type'] === 'inventory') {
                     $inventory = \App\Models\Inventory::find($itemData['inventory_id']);
                     if ($inventory) {
-                        // Use selling price as source of truth
                         $itemData['unit_price'] = (float) $inventory->selling_price;
                     }
+                    $itemData['line_type'] = 'item';
+                    $itemData['reference_type'] = \App\Models\Inventory::class;
+                    $itemData['reference_id'] = $itemData['inventory_id'];
                 }
 
-                $itemAmount = $itemData['unit_price'] * $itemData['qty'];
-                $calculatedSubtotal += $itemAmount;
-                $itemsToCreate[] = array_merge($itemData, ['amount' => $itemAmount, 'is_hidden' => false]);
-
-                // Auto-add consumables
-                if ($itemData['item_type'] === 'service' && $service) {
-                    $service->load('consumables');
-                    foreach ($service->consumables as $consumable) {
-                        $itemsToCreate[] = [
-                            'item_type' => 'inventory',
-                            'inventory_id' => $consumable->inventory_id,
-                            'name' => $consumable->inventory->item_name ?? "Consumable",
-                            'qty' => $consumable->quantity * $itemData['qty'],
-                            'unit_price' => 0,
-                            'amount' => 0,
-                            'is_hidden' => true,
-                            'notes' => "Linked consumable for {$service->name}"
-                        ];
-                    }
+                $isHidden = $itemData['is_hidden'] ?? false;
+                $isBillable = $itemData['is_billable'] ?? (!$isHidden);
+                
+                // Enforce 0 amount for hidden items
+                if ($isHidden) {
+                    $itemData['unit_price'] = 0;
+                    $itemAmount = 0;
+                } else {
+                    $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
                 }
+
+                $itemData['unit_price_snapshot'] = $itemData['unit_price'];
+                $itemData['line_total_snapshot'] = $itemAmount;
+                $itemData['is_billable'] = $isBillable;
+
+                $calculatedSubtotal += $isBillable ? $itemAmount : 0;
+                $itemsToCreate[] = $itemData;
             }
 
             // Recalculate total based on backend rules
@@ -234,7 +281,17 @@ class InvoiceController extends Controller
             'items.*.amount' => 'required_with:items|numeric|min:0',
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
+            'items.*.is_hidden' => 'sometimes|boolean',
         ]);
+
+        if (!empty($validated['appointment_id'])) {
+            $appt = \App\Models\Appointment::find($validated['appointment_id']);
+            if ($appt && $appt->pet_id != $invoice->pet_id) {
+                throw ValidationException::withMessages([
+                    'appointment_id' => 'This appointment belongs to a different pet.'
+                ]);
+            }
+        }
 
         if ($invoice->status === 'Finalized' && in_array($validated['status'], ['Draft', 'Finalized'])) {
              // If already finalized, only allow payment updates
@@ -259,9 +316,6 @@ class InvoiceController extends Controller
             }
 
             if (isset($validated['items'])) {
-                // Delete existing hidden items first to re-add them based on updated services
-                $invoice->items()->where('is_hidden', true)->delete();
-
                 foreach ($validated['items'] as $itemData) {
                     if ($itemData['item_type'] === 'service') {
                         $service = \App\Models\Service::find($itemData['service_id']);
@@ -272,33 +326,36 @@ class InvoiceController extends Controller
                                  throw ValidationException::withMessages(['items' => $e->getMessage()]);
                             }
                         }
+                        $itemData['line_type'] = 'service';
+                        $itemData['reference_type'] = \App\Models\Service::class;
+                        $itemData['reference_id'] = $itemData['service_id'];
                     } else if ($itemData['item_type'] === 'inventory') {
                         $inventory = \App\Models\Inventory::find($itemData['inventory_id']);
                         if ($inventory) {
                             $itemData['unit_price'] = (float) $inventory->selling_price;
                         }
+                        $itemData['line_type'] = 'item';
+                        $itemData['reference_type'] = \App\Models\Inventory::class;
+                        $itemData['reference_id'] = $itemData['inventory_id'];
                     }
 
-                    $itemAmount = $itemData['unit_price'] * $itemData['qty'];
-                    $calculatedSubtotal += $itemAmount;
-                    $itemsToUpdate[] = array_merge($itemData, ['amount' => $itemAmount, 'is_hidden' => false]);
-
-                    // Auto-add consumables
-                    if ($itemData['item_type'] === 'service' && $service) {
-                        $service->load('consumables');
-                        foreach ($service->consumables as $consumable) {
-                            $itemsToUpdate[] = [
-                                'item_type' => 'inventory',
-                                'inventory_id' => $consumable->inventory_id,
-                                'name' => $consumable->inventory->item_name ?? "Consumable",
-                                'qty' => $consumable->quantity * $itemData['qty'],
-                                'unit_price' => 0,
-                                'amount' => 0,
-                                'is_hidden' => true,
-                                'notes' => "Linked consumable for {$service->name}"
-                            ];
-                        }
+                    $isHidden = $itemData['is_hidden'] ?? false;
+                    $isBillable = $itemData['is_billable'] ?? (!$isHidden);
+                    
+                    // Enforce 0 amount for hidden items
+                    if ($isHidden) {
+                        $itemData['unit_price'] = 0;
+                        $itemAmount = 0;
+                    } else {
+                        $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
                     }
+
+                    $itemData['unit_price_snapshot'] = $itemData['unit_price'];
+                    $itemData['line_total_snapshot'] = $itemAmount;
+                    $itemData['is_billable'] = $isBillable;
+
+                    $calculatedSubtotal += $isBillable ? $itemAmount : 0;
+                    $itemsToUpdate[] = $itemData;
                 }
             } else {
                 $calculatedSubtotal = $invoice->subtotal;

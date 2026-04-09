@@ -15,9 +15,15 @@ class AppointmentController extends Controller
     ) {
         $this->clientNotificationService = $clientNotificationService;
     }
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(Appointment::with(['pet', 'service', 'vet'])->orderBy('date', 'desc')->get());
+        $query = Appointment::with(['pet', 'service', 'vet'])->orderBy('date', 'desc');
+        
+        if ($request->has('pet_id')) {
+            $query->where('pet_id', $request->pet_id);
+        }
+        
+        return response()->json($query->get());
     }
 
     public function store(Request $request)
