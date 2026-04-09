@@ -74,7 +74,17 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
   };
 
   const handleCheckboxChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: !!value }));
+    setFormData(prev => {
+        const newData = { ...prev, [field]: !!value };
+        // Only nullify price if both retail and service use are disabled
+        if (field === 'is_sellable' && !value && !newData.is_service_usable) {
+            newData.selling_price = null;
+        }
+        if (field === 'is_service_usable' && !value && !newData.is_sellable) {
+            newData.selling_price = null;
+        }
+        return newData;
+    });
   };
 
   const handleSave = async () => {
@@ -176,16 +186,6 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
               ) : (
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50">{product.item_name}</h2>
               )}
-              {isEditing ? (
-                <input
-                  type="text"
-                  className={inputClass + " text-sm mt-1"}
-                  value={formData.sub_details || ""}
-                  onChange={(e) => handleChange("sub_details", e.target.value)}
-                />
-              ) : (
-                <p className="text-sm text-slate-500 dark:text-zinc-400">{product.sub_details || "No sub details provided."}</p>
-              )}
             </div>
             <span
               className={clsx(
@@ -200,11 +200,10 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
           <div className="mb-6 grid grid-cols-2 gap-y-4">
             {[
               ["Category", "inventory_category_id"],
-              ["SKU", "sku"],
-              ["Stock Level", "stock_level"],
+              ["Quantity", "stock_level"],
               ["Min Stock (Alert)", "min_stock_level"],
-              ["Price", "price"],
-              ["Supplier", "supplier"],
+              ["Selling Price", "selling_price"],
+              ["Cost Price", "cost_price"],
               ["Expiration Date", "expiration_date"],
             ].map(([label, field]) => (
               <div key={field}>
@@ -222,24 +221,22 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
                         <option key={cat.id} value={cat.id}>{cat.name}</option>
                       ))}
                     </select>
-                  ) : field === "sku" ? (
-                    <input
-                      type="text"
-                      readOnly
-                      className={clsx(inputClass, "bg-slate-50 dark:bg-dark-surface/50 cursor-not-allowed opacity-70")}
-                      value={formData[field] ?? ""}
-                    />
                   ) : (
                     <input
                       type={
-                        field === "price" || field === "stock_level" || field === "min_stock_level" 
+                        field === "price" || field === "selling_price" || field === "stock_level" || field === "min_stock_level" 
                           ? "number" 
                           : field === "expiration_date" 
                             ? "date" 
                             : "text"
                       }
-                      className={inputClass}
+                      className={clsx(
+                        inputClass,
+                        field === "selling_price" && (!formData.is_sellable && !formData.is_service_usable) && "opacity-50 cursor-not-allowed bg-slate-100 dark:bg-dark-surface/50"
+                      )}
                       value={formData[field] ?? ""}
+                      disabled={field === "selling_price" && (!formData.is_sellable && !formData.is_service_usable)}
+                      placeholder={field === "selling_price" && (!formData.is_sellable && !formData.is_service_usable) ? "N/A" : ""}
                       onChange={(e) => handleChange(field, e.target.value)}
                     />
                   )
@@ -256,7 +253,7 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
                     )}
                   </p>
                 ) : (field === "stock_level" || field === "min_stock_level") ? (
-                  <p className="font-semibold text-slate-800 dark:text-zinc-200">{Number(product[field] || 0).toLocaleString()} units</p>
+                  <p className="font-semibold text-slate-800 dark:text-zinc-200">{Number(product[field] || 0).toLocaleString()} {product.unit || "units"}</p>
                 ) : (
                   <p className="font-semibold text-slate-800 dark:text-zinc-200">{product[field] || "N/A"}</p>
                 )}
@@ -264,56 +261,65 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
             ))}
           </div>
 
-          {/* Invoice & Logic Flags */}
-          <div className="mb-6 grid grid-cols-2 gap-4 rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-dark-border dark:bg-dark-surface/50">
-            <div className="flex flex-col gap-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">Invoicing Profile</p>
-              {isEditing ? (
-                <label className="flex items-center gap-2 cursor-pointer mt-1">
-                  <input 
-                    type="checkbox" 
-                    checked={!!formData.is_billable} 
-                    onChange={(e) => handleCheckboxChange("is_billable", e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
-                  />
-                  <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Billable?</span>
-                </label>
-              ) : (
-                <div className="flex items-center gap-2 mt-1">
-                  <span className={clsx(
-                    "inline-block h-2 w-2 rounded-full",
-                    product.is_billable ? "bg-emerald-500" : "bg-slate-300"
-                  )} />
-                  <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    {product.is_billable ? "Billable Item" : "Non-Billable"}
-                  </span>
-                </div>
-              )}
+          {/* Usage Configuration Block */}
+          <div className="mb-6 rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-dark-border dark:bg-dark-surface/50">
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-200/50 dark:border-dark-border/50">
+               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">Usage Configuration</p>
+               {product.is_sellable && product.is_service_usable && (
+                 <span className="flex items-center gap-1 text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-md">
+                   Dual Purpose
+                 </span>
+               )}
             </div>
 
-            <div className="flex flex-col gap-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">Inventory Logic</p>
-              {isEditing ? (
-                <label className="flex items-center gap-2 cursor-pointer mt-1">
-                  <input 
-                    type="checkbox" 
-                    checked={!!formData.deduct_on_finalize} 
-                    onChange={(e) => handleCheckboxChange("deduct_on_finalize", e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
-                  />
-                  <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Auto-Deduct?</span>
-                </label>
-              ) : (
-                <div className="flex items-center gap-2 mt-1">
-                   <span className={clsx(
-                    "inline-block h-2 w-2 rounded-full",
-                    product.deduct_on_finalize ? "bg-blue-500" : "bg-amber-500"
-                  )} />
-                  <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    {product.deduct_on_finalize ? "Deduct on Finalize" : "Manual Stock Out"}
-                  </span>
-                </div>
-              )}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                {isEditing ? (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={!!formData.is_sellable} 
+                      onChange={(e) => handleCheckboxChange("is_sellable", e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" 
+                    />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Sellable? (Retail)</span>
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className={clsx(
+                      "inline-block h-2 w-2 rounded-full",
+                      product.is_sellable ? "bg-emerald-500" : "bg-slate-300"
+                    )} />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
+                      {product.is_sellable ? "Sellable" : "Internal Use Only"}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                {isEditing ? (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={!!formData.is_service_usable} 
+                      onChange={(e) => handleCheckboxChange("is_service_usable", e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                    />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Usable in Services?</span>
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className={clsx(
+                      "inline-block h-2 w-2 rounded-full",
+                      product.is_service_usable ? "bg-blue-500" : "bg-slate-300"
+                    )} />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
+                      {product.is_service_usable ? "Service Usable" : "Physical Product Only"}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           

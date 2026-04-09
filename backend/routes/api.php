@@ -29,7 +29,7 @@ use App\Http\Controllers\CmsContentController;
 // Public routes (no authentication required)
 // ---------------------------------------------------------------------------
 
-Route::post('/login', [AuthController::class, 'login'])->name('login');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1')->name('login');
 
 /** Health-check endpoint — intentionally public for monitoring tools. */
 Route::get('/status', function () {
@@ -55,6 +55,19 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('/user',     function (Request $request) { return $request->user(); });
     Route::get('/vets',     [UserController::class, 'vets']);
     Route::post('/change-password', [AuthController::class, 'changePassword']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+
+    // -----------------------------------------------------------------------
+    // Notifications
+    // -----------------------------------------------------------------------
+    Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'index']);
+    Route::post('/notifications/mark-as-read', [\App\Http\Controllers\NotificationController::class, 'markAsRead']);
+
+    // Client Notifications
+    Route::get('/client-notifications', [\App\Http\Controllers\ClientNotificationController::class, 'index']);
+    Route::post('/client-notifications/send', [\App\Http\Controllers\ClientNotificationController::class, 'send']);
+    Route::apiResource('client-notifications/templates', \App\Http\Controllers\NotificationTemplateController::class)->names('client-notifications.templates');
+
 
     // -----------------------------------------------------------------------
     // Inventory
@@ -98,11 +111,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
         Route::apiResource('appointments',    AppointmentController::class);
 
+        Route::get('invoices/resolve-breakdown', [InvoiceController::class, 'resolveBreakdown']);
         Route::apiResource('invoices',        InvoiceController::class);
         Route::apiResource('services',        ServiceController::class);
         Route::apiResource('medical-records', MedicalRecordController::class);
         Route::apiResource('owners',          OwnerController::class);
         Route::apiResource('pets',            \App\Http\Controllers\PetController::class);
+        Route::post('vet-schedules/bulk',    [VetScheduleController::class, 'bulkStore']);
         Route::apiResource('vet-schedules',   VetScheduleController::class);
         Route::post('owners/import',          [OwnerController::class, 'import']);
     });
@@ -148,13 +163,24 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     });
 
     // -----------------------------------------------------------------------
-    // Archive & Recovery Management
+    // Archive & Recovery Management & Audit Log
     // Restricted to Admin
     // -----------------------------------------------------------------------
     Route::group(['prefix' => 'archives', 'middleware' => 'role:' . implode(',', Roles::adminRoles())], function () {
         Route::get('/{type}', [\App\Http\Controllers\ArchiveController::class, 'index']);
         Route::post('/{type}/{id}/restore', [\App\Http\Controllers\ArchiveController::class, 'restore']);
         Route::delete('/{type}/{id}/force', [\App\Http\Controllers\ArchiveController::class, 'forceDelete']);
+    });
+
+    Route::group(['middleware' => 'role:' . implode(',', Roles::adminRoles())], function () {
+        Route::get('/audit-logs', [\App\Http\Controllers\AuditLogController::class, 'index']);
+        
+        // Database Backup & Restore
+        Route::get('/backups', [\App\Http\Controllers\BackupController::class, 'index']);
+        Route::post('/backups', [\App\Http\Controllers\BackupController::class, 'create']);
+        Route::post('/backups/restore', [\App\Http\Controllers\BackupController::class, 'restore']);
+        Route::delete('/backups/{filename}', [\App\Http\Controllers\BackupController::class, 'destroy']);
+        Route::get('/backups/download/{filename}', [\App\Http\Controllers\BackupController::class, 'download']);
     });
 
     // -----------------------------------------------------------------------

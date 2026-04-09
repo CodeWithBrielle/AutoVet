@@ -14,14 +14,19 @@ import {
   FiHeart,
   FiAlertCircle,
   FiClipboard,
+  FiBell,
 } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
+import { useFormErrors } from "../../hooks/useFormErrors";
 import { LuStethoscope, LuPawPrint, LuPill } from "react-icons/lu";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import OwnerProfileModal from "./OwnerProfileModal";
 import { useAuth } from "../../context/AuthContext";
 import { ROLES, VET_AND_ADMIN } from "../../constants/roles";
+import ManualSendModal from "../notifications/ManualSendModal";
+import EditPatientModal from "./EditPatientModal";
+import { FiEdit3, FiTrash2 } from "react-icons/fi";
 
 const tabs = [
   { key: "overview", label: "Overview", icon: LuPawPrint },
@@ -84,6 +89,13 @@ function formatCurrency(value) {
   })}`;
 }
 
+function formatAgeGroup(group) {
+  if (!group) return "—";
+  if (group === "Puppy/Kitten") return "Baby";
+  if (group === "Junior") return "Young";
+  return group;
+}
+
 function calculateAge(dob) {
   if (!dob) return null;
   const birth = new Date(dob);
@@ -143,11 +155,11 @@ async function generatePatientPDF(patient) {
       ["Species", patient.species?.name || "—"],
       ["Breed", patient.breed?.name || "—"],
       ["Sex", patient.sex || "—"],
-      ["Age Group", patient.age_group || "—"],
+      ["Age Group", formatAgeGroup(patient.age_group)],
       ["Date of Birth", patient.date_of_birth ? `${formatDate(patient.date_of_birth)} (${calculateAge(patient.date_of_birth)})` : "—"],
       ["Color", patient.color || "—"],
       ["Weight", patient.weight ? `${patient.weight} ${patient.weight_unit}` : "—"],
-      ["Size Category", patient.size_category?.name || "—"],
+      ["Size Category", patient.size_category?.name || patient.size_category_id || "—"],
       ["Status", patient.status || "—"],
     ],
     margin: { left: 14, right: 14 },
@@ -219,15 +231,185 @@ async function generatePatientPDF(patient) {
   doc.save(`${patient.name.replace(/\s+/g, "_")}_Summary.pdf`);
 }
 
+async function generateMedicalRecordPDF(record, patient) {
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+
+  // Header
+  doc.setFillColor(37, 99, 235);
+  doc.rect(0, 0, pageW, 32, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text("AutoVet: Medical Record", 14, 16);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Record ID: #${record.id}`, 14, 24);
+  doc.text(`Date: ${formatDate(record.created_at)}`, pageW - 14, 24, { align: "right" });
+
+  let y = 44;
+  doc.setTextColor(30, 41, 59);
+
+  // Patient Info Block
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Patient Information", 14, y);
+  y += 6;
+  autoTable(doc, {
+    startY: y,
+    theme: "plain",
+    bodyStyles: { fontSize: 9 },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 30 } },
+    body: [
+      ["Name", patient.name],
+      ["Species", patient.species?.name || "—"],
+      ["Breed", patient.breed?.name || "—"],
+      ["Sex/Age", `${patient.sex || "—"} / ${calculateAge(patient.date_of_birth) || "—"}`],
+    ],
+    margin: { left: 14 },
+  });
+
+  y = doc.lastAutoTable.finalY + 10;
+
+  // Clinical Details
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.text("Clinical Examination", 14, y);
+  y += 8;
+
+  const clinicalData = [
+    ["Chief Complaint", record.chief_complaint || "—"],
+    ["Clinical Findings", record.findings || "—"],
+    ["Diagnosis", record.diagnosis || "—"],
+    ["Treatment Plan", record.treatment_plan || "—"],
+  ];
+
+  autoTable(doc, {
+    startY: y,
+    theme: "grid",
+    headStyles: { fillColor: [248, 250, 252], textColor: [51, 65, 85], fontStyle: "bold" },
+    bodyStyles: { fontSize: 10, cellPadding: 4 },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 40, fillColor: [248, 250, 252] } },
+    head: [["Category", "Details"]],
+    body: clinicalData,
+  });
+
+  y = doc.lastAutoTable.finalY + 10;
+
+  if (record.notes || record.follow_up_date) {
+    const extra = [];
+    if (record.notes) extra.push(["Private Notes", record.notes]);
+    if (record.follow_up_date) extra.push(["Follow-up Date", formatDate(record.follow_up_date)]);
+
+    autoTable(doc, {
+      startY: y,
+      theme: "grid",
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
+      body: extra,
+    });
+    y = doc.lastAutoTable.finalY + 10;
+  }
+
+  if (record.vet) {
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "italic");
+    doc.text(`Attending Veterinarian: Dr. ${record.vet.name}`, 14, y);
+  }
+
+  doc.save(`Medical_Record_${patient.name}_${record.id}.pdf`);
+}
+
+async function generateAllMedicalRecordsPDF(records, patient) {
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+  
+  doc.setFontSize(22);
+  doc.setFont("helvetica", "bold");
+  doc.text("Medical History Report", 14, 20);
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Patient: ${patient.name} (#${patient.id})`, 14, 28);
+  doc.text(`Total Records: ${records.length}`, 14, 34);
+  doc.text(`Generated: ${new Date().toLocaleDateString()}`, pageW - 14, 34, { align: "right" });
+
+  let y = 45;
+
+  records.forEach((record, index) => {
+    if (index > 0 && y > doc.internal.pageSize.getHeight() - 40) {
+      doc.addPage();
+      y = 20;
+    }
+
+    doc.setFillColor(241, 245, 249);
+    doc.rect(14, y, pageW - 28, 8, "F");
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(37, 99, 235);
+    doc.text(`RECORD #${record.id} - ${formatDate(record.created_at)}`, 18, y + 5.5);
+    doc.setTextColor(30, 41, 59);
+
+    y += 12;
+
+    autoTable(doc, {
+      startY: y,
+      theme: "grid",
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 0: { fontStyle: "bold", cellWidth: 30 } },
+      body: [
+        ["Complaint", record.chief_complaint || "—"],
+        ["Diagnosis", record.diagnosis || "—"],
+        ["Treatment", record.treatment_plan || "—"]
+      ],
+    });
+
+    y = doc.lastAutoTable.finalY + 10;
+  });
+
+  doc.save(`Medical_History_${patient.name}.pdf`);
+}
+
+
 /* ───────────────────────────────────────── Component ── */
 
-function ViewPatientProfile({ patient }) {
+function ViewPatientProfile({ patient, onRefresh }) {
   const navigate = useNavigate();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedOwnerId, setSelectedOwnerId] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const { user } = useAuth();
   const isStaff = user?.role === ROLES.STAFF;
   const isVet = VET_AND_ADMIN.includes(user?.role);
+
+  const handleArchive = async () => {
+    if (!user?.token) return;
+    setIsArchiving(true);
+    try {
+      const res = await fetch(`/api/pets/${patient.id}`, {
+        method: "DELETE",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${user.token}`
+        }
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.message || "Failed to archive patient.");
+      }
+
+      toast.success("Patient record archived successfully.");
+      navigate("/patients");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setIsArchiving(false);
+      setIsArchiveModalOpen(false);
+    }
+  };
 
   if (!patient) {
     return (
@@ -258,15 +440,35 @@ function ViewPatientProfile({ patient }) {
             </p>
           </div>
         </div>
-        <span
-          className={clsx(
-            "inline-flex rounded-full border px-4 py-1.5 text-sm font-semibold",
-            statusStyles[patient.status] ||
-              "border-slate-200 bg-slate-50 text-slate-600 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-300"
+        <div className="flex items-center gap-3">
+          {(isVet || isStaff) && (
+            <button
+              onClick={() => setIsEditModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-sm font-semibold text-blue-600 shadow-sm hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30 transition"
+            >
+              <FiEdit3 className="h-4 w-4" />
+              Edit Profile
+            </button>
           )}
-        >
-          {patient.status || "Unknown"}
-        </span>
+          {isVet && (
+            <button
+              onClick={() => setIsArchiveModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm font-semibold text-rose-600 shadow-sm hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400 dark:hover:bg-rose-900/30 transition"
+            >
+              <FiTrash2 className="h-4 w-4" />
+              Archive
+            </button>
+          )}
+          <span
+            className={clsx(
+              "inline-flex rounded-full border px-4 py-1.5 text-sm font-semibold",
+              statusStyles[patient.status] ||
+                "border-slate-200 bg-slate-50 text-slate-600 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-300"
+            )}
+          >
+            {patient.status || "Unknown"}
+          </span>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -305,6 +507,47 @@ function ViewPatientProfile({ patient }) {
         isOpen={!!selectedOwnerId} 
         onClose={() => setSelectedOwnerId(null)} 
       />
+
+      <EditPatientModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        patient={patient}
+        onSaveSuccess={() => {
+          toast.success("Patient profile updated successfully.");
+          onRefresh?.();
+        }}
+      />
+
+      {/* Archive Confirmation Modal */}
+      {isArchiveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-dark-card border dark:border-dark-border">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400">
+              <FiTrash2 className="h-6 w-6" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-zinc-50">Archive Patient Record</h3>
+            <p className="mt-2 text-sm text-slate-600 dark:text-zinc-400 leading-relaxed">
+              Are you sure you want to archive this patient? This action will hide the patient from active records 
+              but will preserve medical history, appointments, invoices, and related data for audit and recovery purposes.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setIsArchiveModalOpen(false)}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-dark-border dark:bg-zinc-800 dark:text-zinc-300"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={isArchiving}
+                onClick={handleArchive}
+                className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-50 transition-colors"
+              >
+                {isArchiving ? "Archiving..." : "Archive Patient"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -326,7 +569,7 @@ function OverviewTab({ patient, onOpenOwner }) {
             { label: "Species", value: patient.species?.name || "N/A" },
             { label: "Breed", value: patient.breed?.name || "N/A" },
             { label: "Sex", value: patient.sex || "N/A" },
-            { label: "Age Group", value: patient.age_group || "N/A" },
+            { label: "Age Group", value: formatAgeGroup(patient.age_group) },
             { label: "Age", value: calculateAge(patient.date_of_birth) || "N/A" },
             { label: "Color", value: patient.color || "N/A" },
             { label: "Weight", value: patient.weight ? `${patient.weight} ${patient.weight_unit}` : "N/A" },
@@ -566,35 +809,87 @@ function InvoiceTab({ invoices }) {
 
 function MedicalRecordsTab({ patient, isStaff, isVet }) {
   const toast = useToast();
+  const { user } = useAuth();
   const [records, setRecords] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
 
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState("");
+  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [sendingRecord, setSendingRecord] = useState(null);
+
   const fetchRecords = () => {
-    fetch(`/api/medical-records?pet_id=${patient.id}`)
-      .then(res => res.json())
+    if (!user?.token) return;
+    fetch(`/api/medical-records?pet_id=${patient.id}`, {
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Bearer ${user.token}`
+      }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to fetch medical records");
+        return res.json();
+      })
       .then(data => setRecords(data))
-      .catch(err => console.error("Error fetching medical records", err));
+      .catch(err => {
+        console.error("Error fetching medical records:", err);
+        toast.error("Failed to load medical history.");
+      });
+  };
+
+  const fetchAppointments = () => {
+    if (!user?.token) return;
+    fetch(`/api/appointments?pet_id=${patient.id}`, {
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Bearer ${user.token}`
+      }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to fetch appointments");
+        return res.json();
+      })
+      .then(data => {
+        setAppointments(data.slice(0, 10));
+      })
+      .catch(err => {
+        console.error("Error fetching appointments:", err);
+      });
   };
 
   useEffect(() => {
     fetchRecords();
+    fetchAppointments();
   }, [patient.id]);
 
-  const onSave = (record) => {
+  const onSave = (record, setErrors) => {
+    if (!record.appointment_id) {
+      toast.error("Please select an appointment for this medical record.");
+      return;
+    }
     const isEdit = !!editingRecord;
     const method = isEdit ? "PUT" : "POST";
     const url = isEdit ? `/api/medical-records/${editingRecord.id}` : "/api/medical-records";
     
     fetch(url, {
       method,
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { 
+        "Content-Type": "application/json", 
+        "Accept": "application/json",
+        "Authorization": `Bearer ${user?.token}`
+      },
       body: JSON.stringify({ ...record, pet_id: patient.id })
     })
     .then(async (res) => {
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.message || "Failed to save medical record");
+        if (res.status === 422 && setErrors) {
+          setErrors(error);
+          toast.error("Validation error. Please check the fields.");
+        } else {
+          throw new Error(error.message || "Failed to save medical record");
+        }
+        return;
       }
       toast.success(`Medical record ${isEdit ? 'updated' : 'added'} successfully`);
       setIsModalOpen(false);
@@ -605,7 +900,13 @@ function MedicalRecordsTab({ patient, isStaff, isVet }) {
 
   const deleteRecord = (id) => {
     if (!confirm("Are you sure you want to delete this record?")) return;
-    fetch(`/api/medical-records/${id}`, { method: "DELETE" })
+    fetch(`/api/medical-records/${id}`, { 
+      method: "DELETE",
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Bearer ${user?.token}`
+      }
+    })
       .then(res => {
         if (!res.ok) throw new Error("Failed to delete");
         toast.success("Record deleted");
@@ -617,10 +918,22 @@ function MedicalRecordsTab({ patient, isStaff, isVet }) {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-         <h3 className="text-lg font-semibold text-slate-800 dark:text-zinc-100">Patient History</h3>
+         <div className="flex items-center gap-4">
+           <h3 className="text-lg font-semibold text-slate-800 dark:text-zinc-100">Patient History</h3>
+           {records.length > 0 && (
+             <button
+               onClick={() => generateAllMedicalRecordsPDF(records, patient)}
+               className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 dark:text-blue-400"
+               title="Download full history as PDF"
+             >
+               <FiDownload className="h-3.5 w-3.5" />
+               Download All
+             </button>
+           )}
+         </div>
          {isVet && (
            <button 
-             onClick={() => { setEditingRecord(null); setIsModalOpen(true); }}
+             onClick={() => { setEditingRecord(null); setSelectedAppointmentId(""); setIsModalOpen(true); }}
              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
            >
              Add Record
@@ -638,12 +951,31 @@ function MedicalRecordsTab({ patient, isStaff, isVet }) {
                   <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">{formatDate(record.created_at)}</p>
                   {record.vet && <p className="text-xs text-slate-500 dark:text-zinc-400">Attending Vet: Dr. {record.vet.name}</p>}
                </div>
-                {isVet && (
-                  <div className="flex gap-3">
-                    <button onClick={() => { setEditingRecord(record); setIsModalOpen(true); }} className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
-                    <button onClick={() => deleteRecord(record.id)} className="text-sm font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
-                  </div>
-                )}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => generateMedicalRecordPDF(record, patient)}
+                    className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400"
+                    title="Export to PDF"
+                  >
+                    <FiDownload className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSendingRecord(record);
+                      setIsSendModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400"
+                    title="Notify Client"
+                  >
+                    <FiBell className="h-4 w-4" />
+                  </button>
+                  {isVet && (
+                    <>
+                      <button onClick={() => { setEditingRecord(record); setSelectedAppointmentId(record.appointment_id || ""); setIsModalOpen(true); }} className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
+                      <button onClick={() => deleteRecord(record.id)} className="text-sm font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
+                    </>
+                  )}
+                </div>
              </div>
              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-700 dark:text-zinc-300">
                <div><strong className="text-slate-900 dark:text-zinc-100">Chief Complaint:</strong> {record.chief_complaint || "—"}</div>
@@ -664,18 +996,50 @@ function MedicalRecordsTab({ patient, isStaff, isVet }) {
           onSave={onSave} 
           isStaff={isStaff}
           isVet={isVet}
+          appointments={appointments}
+          selectedAppointmentId={selectedAppointmentId}
+          setSelectedAppointmentId={setSelectedAppointmentId}
         />
       )}
+
+      <ManualSendModal 
+        isOpen={isSendModalOpen} 
+        onClose={() => setIsSendModalOpen(false)} 
+        owner={patient?.owner}
+        relatedObject={sendingRecord}
+        relatedType="App\Models\MedicalRecord"
+      />
     </div>
   );
 }
 
-function MedicalRecordModal({ record, onClose, onSave, isStaff, isVet }) {
+function MedicalRecordModal({ 
+  record, 
+  onClose, 
+  onSave, 
+  isStaff, 
+  isVet, 
+  appointments, 
+  selectedAppointmentId, 
+  setSelectedAppointmentId 
+}) {
   const isEdit = !!record;
+  const { setLaravelErrors, clearErrors, getError } = useFormErrors();
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    onSave(Object.fromEntries(fd.entries()));
+    const data = Object.fromEntries(fd.entries());
+    // Attach appointment ID from state
+    data.appointment_id = selectedAppointmentId;
+    
+    // Clear previous errors
+    clearErrors();
+
+    // We need to handle the fetch here or pass setLaravelErrors up.
+    // For simplicity, let's keep the onSave as is but wrap it if it fails with 422.
+    // Actually, it's better if onSave returns the response or throws.
+    onSave(data, setLaravelErrors);
   };
 
   return (
@@ -687,9 +1051,38 @@ function MedicalRecordModal({ record, onClose, onSave, isStaff, isVet }) {
         </div>
         <div className="overflow-y-auto p-6">
           <form id="med-record-form" onSubmit={handleSubmit} className="space-y-4">
+             {/* Appointment Selector */}
+             <div>
+               <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Link to Appointment (Required)</label>
+               <select 
+                 value={selectedAppointmentId}
+                 onChange={(e) => setSelectedAppointmentId(e.target.value)}
+                 className={clsx(
+                   "w-full rounded-xl border px-3 py-2.5 text-sm dark:bg-dark-surface focus:outline-none focus:border-blue-400 dark:text-zinc-200",
+                   getError("appointment_id") ? "border-rose-500 bg-rose-50/10" : "border-slate-200 dark:border-dark-border"
+                 )}
+               >
+                 <option value="">Select an appointment...</option>
+                 {appointments.map(apt => (
+                   <option key={apt.id} value={apt.id}>
+                     {formatDate(apt.date)} - {apt.title}
+                   </option>
+                 ))}
+               </select>
+               {getError("appointment_id") && <p className="mt-1 text-xs font-medium text-rose-500">{getError("appointment_id")}</p>}
+             </div>
+
              <div>
                <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Chief Complaint</label>
-               <input name="chief_complaint" defaultValue={record?.chief_complaint || ""} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200 focus:outline-none focus:border-blue-400" />
+               <input 
+                 name="chief_complaint" 
+                 defaultValue={record?.chief_complaint || ""} 
+                 className={clsx(
+                   "w-full rounded-xl border px-3 py-2.5 text-sm dark:bg-dark-surface dark:text-zinc-200 focus:outline-none focus:border-blue-400",
+                   getError("chief_complaint") ? "border-rose-500 bg-rose-50/10" : "border-slate-200 dark:border-dark-border"
+                 )} 
+               />
+               {getError("chief_complaint") && <p className="mt-1 text-xs font-medium text-rose-500">{getError("chief_complaint")}</p>}
              </div>
              <div>
                <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Findings</label>

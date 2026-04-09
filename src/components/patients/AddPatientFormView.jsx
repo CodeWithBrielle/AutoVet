@@ -9,6 +9,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
 import { useAuth } from "../../context/AuthContext";
 import PhoneInput from "../common/PhoneInput";
+import { getAgeGroup } from "../../utils/petAgeGroups";
 
 const steps = ["Pet Information", "Owner Details", "Medical History"];
 
@@ -33,22 +34,19 @@ function StepPill({ label, index, active }) {
 
 const patientSchema = z.object({
   name: z.string().min(1, "Pet name is required").max(255),
-  species_id: z.string().min(1, "Species is required"),
-  breed_id: z.string().optional(),
+  species_id: z.coerce.string().min(1, "Species is required"),
+  breed_id: z.coerce.string().optional().or(z.literal("")),
   date_of_birth: z.string().optional().or(z.literal("")),
   sex: z.string().max(50).optional(),
   age_group: z.string().optional().or(z.literal("")),
   color: z.string().max(255).optional(),
   weight: z.coerce.number().min(0.01, "Weight is required to determine pet size").max(500, "Weight exceeds valid range"),
   weight_unit: z.enum(["kg", "lbs"]).default("kg"),
-  size_category_id: z.string().optional().or(z.literal("")),
+  size_category_id: z.coerce.string().optional().or(z.literal("")),
   status: z.string().max(50).optional(),
-  owner_id: z.string().optional(),
+  owner_id: z.coerce.string().optional(),
   owner_name: z.string().optional(),
-  owner_phone: z.string()
-    .min(5, "Phone number is too short")
-    .max(20, "Phone number is too long")
-    .regex(/^\+?[1-9]\d{1,14}$/, "Please enter a valid international phone number"),
+  owner_phone: z.string().max(20, "Phone number is too long").optional().or(z.literal("")),
   owner_email: z.string().max(255).optional().or(z.literal("")),
   owner_address: z.string().optional(),
   owner_city: z.string().optional(),
@@ -58,10 +56,31 @@ const patientSchema = z.object({
   medication: z.string().max(255).optional(),
   notes: z.string().optional(),
   photo: z.string().optional()
-}).refine(data => {
-  if (!data.owner_id && !data.owner_name?.trim()) return false;
-  return true;
-}, { message: "Either select an existing owner or provide a new owner name", path: ["owner_name"] });
+}).superRefine((data, ctx) => {
+  // If no existing owner is selected, require owner_name and owner_phone
+  if (!data.owner_id || data.owner_id === "") {
+    if (!data.owner_name?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Owner name is required for new owners",
+        path: ["owner_name"]
+      });
+    }
+    if (!data.owner_phone?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Owner phone is required for new owners",
+        path: ["owner_phone"]
+      });
+    } else if (!/^\+?[1-9]\d{1,14}$/.test(data.owner_phone)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Invalid phone number format",
+        path: ["owner_phone"]
+      });
+    }
+  }
+});
 
 function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
   const [error, setError] = useState(null);
@@ -125,6 +144,7 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
 
   const photoValue = watch("photo");
   const speciesIdValue = watch("species_id");
+  const dobValue = watch("date_of_birth");
   const weightValue = watch("weight");
 
   const selectedSpecies = speciesList.find(s => s.id.toString() === speciesIdValue);
@@ -166,13 +186,29 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
   };
 
   const calculatedSizeId = calculateDynamicSize(weightValue, speciesIdValue);
-  const calculatedSizeName = sizeCategories.find(c => c.id.toString() === calculatedSizeId?.toString())?.name || "N/A";
+  const calculatedSizeName = sizeCategories.find(c => c.id.toString() === calculatedSizeId?.toString())?.name || (weightValue && speciesIdValue ? "Unclassified (Check Ranges)" : "N/A");
 
   useEffect(() => {
-    if (calculatedSizeId) {
-      setValue("size_category_id", calculatedSizeId.toString());
+    // If weight and species are present, strictly prioritize the computed size
+    if (weightValue && speciesIdValue) {
+      if (calculatedSizeId) {
+        setValue("size_category_id", calculatedSizeId.toString());
+      } else {
+        // If weight exists but no range matches, clear it to avoid contradicting manual data
+        setValue("size_category_id", "");
+      }
     }
-  }, [calculatedSizeId, setValue]);
+  }, [calculatedSizeId, weightValue, speciesIdValue, setValue]);
+
+  useEffect(() => {
+    if (speciesIdValue && dobValue) {
+      const speciesName = speciesList.find(s => s.id.toString() === speciesIdValue)?.name;
+      const computedAgeGroup = getAgeGroup(speciesName, dobValue);
+      setValue("age_group", computedAgeGroup, { shouldValidate: true });
+    } else if (!dobValue || !speciesIdValue) {
+      setValue("age_group", "Not yet determined");
+    }
+  }, [speciesIdValue, dobValue, speciesList, setValue]);
 
   const isMismatch = breedSuggestedSizeId && calculatedSizeId && breedSuggestedSizeId.toString() !== calculatedSizeId.toString();
 
@@ -188,11 +224,25 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
 
   const onSubmit = async (data) => {
     setError(null);
+    console.log("Submitting form data:", data);
     try {
       let finalOwnerId = initialOwnerId || data.owner_id;
 
       if (!initialOwnerId && isNewOwner) {
         if (!data.owner_name) throw new Error("Owner name is required for a new owner.");
+        
+        const ownerPayload = {
+          name: data.owner_name,
+          phone: data.owner_phone,
+          email: data.owner_email || null,
+          address: data.owner_address || null,
+          city: data.owner_city || null,
+          province: data.owner_province || null,
+          zip: data.owner_zip || null
+        };
+        
+        console.log("Creating new owner with payload:", ownerPayload);
+        
         const ownerRes = await fetch("/api/owners", {
           method: "POST",
           headers: {
@@ -200,22 +250,21 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
             "Accept": "application/json",
             "Authorization": `Bearer ${user?.token}`
           },
-          body: JSON.stringify({
-            name: data.owner_name,
-            phone: data.owner_phone,
-            email: data.owner_email,
-            address: data.owner_address,
-            city: data.owner_city,
-            province: data.owner_province,
-            zip: data.owner_zip
-          }),
+          body: JSON.stringify(ownerPayload),
         });
+
         if (!ownerRes.ok) {
-          const err = await ownerRes.json();
-          throw new Error(err.message || "Failed to create new owner.");
+          const errData = await ownerRes.json().catch(() => ({}));
+          console.error("Owner creation failed:", errData);
+          if (ownerRes.status === 422 && errData.errors) {
+            const messages = Object.values(errData.errors).flat().join(" ");
+            throw new Error(messages || "Validation failed for owner details.");
+          }
+          throw new Error(errData.message || "Failed to create new owner.");
         }
         const newOwner = await ownerRes.json();
         finalOwnerId = newOwner.id;
+        console.log("New owner created successfully, ID:", finalOwnerId);
       }
 
       if (!finalOwnerId) throw new Error("No owner selected or created.");
@@ -226,19 +275,21 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
         name: data.name,
         species_id: data.species_id || null,
         breed_id: data.breed_id || null,
-        date_of_birth: data.date_of_birth,
-        sex: data.sex,
-        age_group: data.age_group,
-        color: data.color,
+        date_of_birth: data.date_of_birth || null,
+        sex: data.sex || null,
+        age_group: data.age_group || null,
+        color: data.color || null,
         weight: data.weight,
-        weight_unit: data.weight_unit,
+        weight_unit: data.weight_unit || "kg",
         size_category_id: data.size_category_id || null,
-        status: data.status,
-        allergies: data.allergies,
-        medication: data.medication,
-        notes: data.notes,
-        photo: data.photo
+        status: data.status || "Healthy",
+        allergies: data.allergies || null,
+        medication: data.medication || null,
+        notes: data.notes || null,
+        photo: data.photo || null
       };
+
+      console.log("Sending pet payload:", petPayload);
 
       const res = await fetch("/api/pets", {
         method: "POST",
@@ -250,15 +301,24 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
         body: JSON.stringify(petPayload),
       });
 
+      console.log("Pet API Response Status:", res.status);
+
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Failed to save pet details.");
+        const errData = await res.json().catch(() => ({}));
+        console.error("Pet creation failed:", errData);
+        if (res.status === 422 && errData.errors) {
+          const messages = Object.values(errData.errors).flat().join(" ");
+          throw new Error(messages || "Validation failed for pet details.");
+        }
+        throw new Error(errData.message || "Failed to save pet details.");
       }
 
       const savedPet = await res.json();
+      console.log("Pet saved successfully:", savedPet);
 
       onSave(savedPet);
     } catch (err) {
+      console.error("Form submission error:", err);
       setError(err.message);
     }
   };
@@ -299,7 +359,10 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
           </div>
         )}
 
-        <form id="add-patient-form" onSubmit={handleSubmit(onSubmit)} className="space-y-8 p-6">
+        <form id="add-patient-form" onSubmit={handleSubmit(onSubmit, (err) => {
+          console.log("Form Validation Errors:", err);
+          setError("Please check the form for errors. " + Object.values(err).map(e => e.message).join(", "));
+        })} className="space-y-8 p-6">
           {/* Pet Profile */}
           <section className="space-y-4">
             <h3 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-zinc-50">
@@ -364,17 +427,19 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Age Group</label>
-                  <select {...register("age_group")} className={getSelectClass(errors.age_group)}>
-                    <option value="">Select Age Group...</option>
-                    <option>Puppy/Kitten</option>
-                    <option>Junior</option>
-                    <option>Adult</option>
-                    <option>Senior</option>
-                  </select>
+                  <div className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold text-slate-700 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200">
+                    <span>{watch("age_group") || "Not yet determined"}</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Auto</span>
+                  </div>
+                  <input type="hidden" {...register("age_group")} />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Date of Birth</label>
                   <input type="date" {...register("date_of_birth")} className={getInputClass(errors.date_of_birth)} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Color</label>
+                  <input {...register("color")} className={getInputClass(errors.color)} placeholder="e.g. Brown, White, Bi-color" />
                 </div>
               </div>
 
@@ -392,22 +457,35 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Size Category</label>
-                  <div className={clsx(
-                    "flex flex-col justify-center rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
-                    isMismatch ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20" : "border-slate-200 bg-slate-50 dark:border-dark-border dark:bg-dark-surface"
-                  )}>
-                    <div className="flex items-center justify-between">
-                      <span className={clsx(isMismatch ? "text-amber-700 dark:text-amber-400" : "text-slate-700 dark:text-zinc-300")}>
-                        {calculatedSizeName}
-                      </span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Weight-Based</span>
+                  {weightValue ? (
+                    <div className={clsx(
+                      "flex flex-col justify-center rounded-xl border px-4 py-2 text-sm font-medium transition-colors min-h-[48px]",
+                      isMismatch ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20" : "border-slate-200 bg-slate-50 dark:border-dark-border dark:bg-dark-surface"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <span className={clsx(isMismatch ? "text-amber-700 dark:text-amber-400 font-bold" : "text-slate-700 dark:text-zinc-300 font-bold")}>
+                          {calculatedSizeName}
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Auto-Computed</span>
+                      </div>
+                      {isMismatch && (
+                        <p className="mt-1 text-[11px] font-normal text-amber-600 dark:text-amber-500/80 leading-tight">
+                          Note: Breed default is {sizeCategories.find(c => c.id.toString() === breedSuggestedSizeId.toString())?.name || "different"}.
+                        </p>
+                      )}
                     </div>
-                    {isMismatch && (
-                      <p className="mt-1 text-[11px] font-normal text-amber-600 dark:text-amber-500/80 leading-tight">
-                        Note: Breed default is {sizeCategories.find(c => c.id.toString() === breedSuggestedSizeId.toString())?.name || "different"}.
-                      </p>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="relative">
+                      <select {...register("size_category_id")} className={getSelectClass(errors.size_category_id)}>
+                        <option value="">Manual Fallback...</option>
+                        {sizeCategories.map(cat => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>
+                      <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <p className="mt-1 text-[10px] text-slate-400 italic">Enter weight to auto-classify</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -467,7 +545,8 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
                       </select>
                       <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     </div>
-                    {errors.owner_name && <p className="mt-1 text-xs text-red-500">{errors.owner_name.message}</p>}
+                    {errors.owner_id && <p className="mt-1 text-xs text-red-500 font-medium">{errors.owner_id.message}</p>}
+                    {errors.owner_name && !isNewOwner && <p className="mt-1 text-xs text-red-500 font-medium">{errors.owner_name.message}</p>}
                   </div>
                 )}
               </section>

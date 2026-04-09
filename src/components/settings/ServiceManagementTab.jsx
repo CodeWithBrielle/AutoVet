@@ -4,6 +4,19 @@ import { FiTrash2, FiPlus, FiEdit2, FiX, FiSave } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 
+export const LINKED_ITEM_ELIGIBLE_CATEGORIES = [
+  "Vaccination",
+  "Grooming",
+  "Medicine",
+  "Preventive Care",
+  "Consultation",
+  "Surgery",
+  "Diagnostic",
+  "Laboratory",
+  "Anesthesia",
+  "Other"
+];
+
 export default function ServiceManagementTab() {
   const toast = useToast();
   const [services, setServices] = useState([]);
@@ -24,7 +37,11 @@ export default function ServiceManagementTab() {
     status: "Active",
     pricing_type: "fixed",
     measurement_basis: "none",
-    base_price: 0,
+    professional_fee: 0,
+    show_on_invoice: true,
+    auto_load_linked_items: true,
+    allow_manual_item_override: true,
+    linked_items: [],
     pricing_rules: []
   });
 
@@ -71,7 +88,9 @@ export default function ServiceManagementTab() {
       .then(res => res.json())
       .then(result => {
         const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setPetSizes(normalized);
+        // Sort by sort_order if available, otherwise keep alphabetical or natural
+        const sorted = [...normalized].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        setPetSizes(sorted);
       })
       .catch(console.error);
 
@@ -88,6 +107,14 @@ export default function ServiceManagementTab() {
       .then(result => {
         const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
         setWeightRanges(normalized);
+      })
+      .catch(console.error);
+
+    fetch("/api/inventory", { headers })
+      .then(res => res.json())
+      .then(result => {
+        const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
+        setInventories(normalized.sort((a, b) => a.item_name.localeCompare(b.item_name)));
       })
       .catch(console.error);
   }, [user?.token]);
@@ -133,6 +160,33 @@ export default function ServiceManagementTab() {
     const isEditing = !!editingService;
     const url = isEditing ? `/api/services/${editingService.id}` : "/api/services";
     const method = isEditing ? "PUT" : "POST";
+
+    // Validation
+    if (formData.pricing_type === 'fixed' && !formData.professional_fee) {
+      toast.error("Fixed Price service requires a Professional Fee.");
+      return;
+    }
+
+    if (formData.pricing_type === 'weight_based' && formData.pricing_rules.length === 0) {
+      toast.error("Weight Based requires at least one pricing rule.");
+      return;
+    }
+
+    // Linked Items Price Validation
+    for (const li of formData.linked_items) {
+      const inv = inventories.find(i => i.id === Number(li.inventory_id));
+      if (!inv) continue;
+      
+      if (!(Number(inv.cost_price) > 0)) {
+        toast.error(`'${inv.item_name}' must have a valid cost price.`);
+        return;
+      }
+
+      if (li.is_billable && !(Number(inv.selling_price) > 0)) {
+        toast.error(`'${inv.item_name}' is billable but has no selling price.`);
+        return;
+      }
+    }
 
     // Clean up pricing rules based on pricing_type
     let cleanedRules = [];
@@ -508,6 +562,11 @@ export default function ServiceManagementTab() {
                 </div>
               </div>
             </form>
+            
+            <div className="p-6 border-t border-slate-200 dark:border-dark-border shrink-0 flex justify-end gap-3 bg-slate-50 dark:bg-dark-surface/30 rounded-b-2xl">
+              <button type="button" onClick={handleCloseModal} className="px-4 py-2 font-semibold text-slate-600 hover:text-slate-800 dark:text-zinc-300">Cancel</button>
+              <button onClick={handleSave} type="button" className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2 font-semibold text-white hover:bg-blue-700"><FiSave/> Save Configuration</button>
+            </div>
           </div>
         </div>
       )}

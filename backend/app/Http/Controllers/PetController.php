@@ -31,6 +31,7 @@ class PetController extends Controller
             'color' => 'nullable|string',
             'weight' => 'required|numeric|min:0.01',
             'weight_unit' => 'nullable|string|exists:units_of_measure,abbreviation',
+            'size_category_id' => 'nullable|exists:pet_size_categories,id',
             'status' => 'nullable|string',
             'allergies' => 'nullable|string',
             'medication' => 'nullable|string',
@@ -71,6 +72,7 @@ class PetController extends Controller
             'color' => 'nullable|string',
             'weight' => 'required|numeric|min:0.01',
             'weight_unit' => 'nullable|string|exists:units_of_measure,abbreviation',
+            'size_category_id' => 'nullable|exists:pet_size_categories,id',
             'status' => 'nullable|string',
             'allergies' => 'nullable|string',
             'medication' => 'nullable|string',
@@ -101,6 +103,10 @@ class PetController extends Controller
 
     public function destroy(Pet $pet)
     {
+        if (!auth()->user()->isAdmin() && !auth()->user()->isClinical()) {
+            return response()->json(['message' => 'Unauthorized. Only Admins and Veterinarians can archive patient records.'], 403);
+        }
+
         $pet->delete();
         return response()->json(null, 204);
     }

@@ -284,7 +284,6 @@ function InventoryView() {
             <thead className="bg-slate-50 dark:bg-dark-surface">
               <tr className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
                 <th className="px-5 py-4">Item Name / Category</th>
-                <th className="px-5 py-4">SKU</th>
                 <th className="px-5 py-4">Stock Level</th>
                 <th className="px-5 py-4">Pricing (Cost/Sell)</th>
                 <th className="px-5 py-4">Status & Logic</th>
@@ -294,13 +293,13 @@ function InventoryView() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan="6" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
+                  <td colSpan="5" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
                     Loading inventory data...
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
+                  <td colSpan="5" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
                     No items found matching the current filter.
                   </td>
                 </tr>
@@ -319,13 +318,11 @@ function InventoryView() {
                           <div>
                             <p className="mb-0.5 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">{catName}</p>
                             <p className="text-lg font-semibold text-slate-900 dark:text-zinc-50">{row.item_name}</p>
-                            <p className="text-sm text-slate-500 dark:text-zinc-400">{row.sub_details}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-4 text-sm text-slate-500 dark:text-zinc-400">{row.sku}</td>
                       <td className="px-5 py-4 text-lg font-medium text-slate-800 dark:text-zinc-200">
-                        {Number(row.stock_level || 0).toLocaleString()} units
+                        {Number(row.stock_level || 0).toLocaleString()} {row.unit || "units"}
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex flex-col">
@@ -368,9 +365,19 @@ function InventoryView() {
                                </span>
                              );
                           })()}
-                          {row.is_billable && (
+                          {row.is_sellable && (
+                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-900/30 dark:bg-emerald-900/20 dark:text-emerald-400 whitespace-nowrap">
+                              Retail
+                            </span>
+                          )}
+                          {row.is_service_usable && (
                             <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:border-blue-900/30 dark:bg-blue-900/20 dark:text-blue-400 whitespace-nowrap">
-                              Billable
+                              Clinic
+                            </span>
+                          )}
+                          {row.is_sellable && row.is_service_usable && (
+                            <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-400 whitespace-nowrap">
+                              Dual
                             </span>
                           )}
                         </div>

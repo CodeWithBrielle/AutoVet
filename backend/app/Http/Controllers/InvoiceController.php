@@ -13,13 +13,44 @@ class InvoiceController extends Controller
 {
     protected $pricingService;
     protected $finalizationService;
+    protected $clientNotificationService;
 
     public function __construct(
         \App\Services\PricingService $pricingService,
-        \App\Services\InvoiceFinalizationService $finalizationService
+        \App\Services\InvoiceFinalizationService $finalizationService,
+        \App\Services\ClientNotificationService $clientNotificationService
     ) {
         $this->pricingService = $pricingService;
         $this->finalizationService = $finalizationService;
+        $this->clientNotificationService = $clientNotificationService;
+    }
+
+    /**
+     * Resolve billing breakdown for a specific service and pet.
+     */
+    public function resolveBreakdown(Request $request)
+    {
+        $validated = $request->validate([
+            'service_id' => 'required|exists:services,id',
+            'pet_id' => 'nullable|exists:pets,id',
+            'qty' => 'required|numeric|min:1',
+            'weight' => 'nullable|numeric|min:0',
+        ]);
+
+        $service = \App\Models\Service::findOrFail($validated['service_id']);
+        $pet = $validated['pet_id'] ? \App\Models\Pet::find($validated['pet_id']) : null;
+
+        try {
+            $breakdown = $this->pricingService->generateBillingBreakdown(
+                $service, 
+                $pet, 
+                (float) $validated['qty'], 
+                $validated['weight'] ? (float) $validated['weight'] : null
+            );
+            return response()->json($breakdown);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
     }
 
     /**
@@ -38,6 +69,8 @@ class InvoiceController extends Controller
     {
         $validated = $request->validate([
             'pet_id' => 'required|exists:pets,id',
+            'appointment_id' => 'required|exists:appointments,id',
+            'pet_weight' => 'nullable|numeric|min:0.01',
             'status' => 'required|in:Draft,Finalized,Paid,Partially Paid,Cancelled',
             'subtotal' => 'required|numeric|min:0',
             'discount_type' => 'required|in:percentage,fixed',
@@ -49,13 +82,19 @@ class InvoiceController extends Controller
             'notes_to_client' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_type' => 'required|in:service,inventory',
+            'items.*.line_type' => 'nullable|in:service,item,adjustment',
             'items.*.name' => 'required|string',
             'items.*.notes' => 'nullable|string',
-            'items.*.qty' => 'required|integer|min:1',
+            'items.*.qty' => 'required|numeric|min:0.01',
             'items.*.unit_price' => 'required|numeric|min:0',
             'items.*.amount' => 'required|numeric|min:0',
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
+            'items.*.is_hidden' => 'sometimes|boolean',
+            'items.*.is_billable' => 'sometimes|boolean',
+            'items.*.unit_price_snapshot' => 'nullable|numeric',
+            'items.*.line_total_snapshot' => 'nullable|numeric',
+            'items.*.metadata_snapshot' => 'nullable|array',
         ]);
 
         if ($validated['discount_value'] > $validated['subtotal'] && $validated['discount_type'] === 'fixed') {
@@ -64,6 +103,16 @@ class InvoiceController extends Controller
         
         if ($validated['status'] === 'Finalized' && $validated['subtotal'] <= 0) {
             throw ValidationException::withMessages(['subtotal' => 'Cannot finalize an invoice with 0 subtotal.']);
+        }
+
+        if (!empty($validated['appointment_id'])) {
+            $appt = \App\Models\Appointment::find($validated['appointment_id']);
+            if ($appt && $appt->pet_id != $validated['pet_id']) {
+                throw ValidationException::withMessages([
+                    'pet_id' => 'The selected pet does not match the appointment record.',
+                    'appointment_id' => 'This appointment belongs to a different pet.'
+                ]);
+            }
         }
 
         DB::beginTransaction();
@@ -75,26 +124,56 @@ class InvoiceController extends Controller
             $invoiceNumber = "VB-{$monthYear}-" . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
 
             $pet = \App\Models\Pet::findOrFail($validated['pet_id']);
+            
+            // Update pet weight if provided
+            if (isset($validated['pet_weight'])) {
+                $pet->update(['weight' => $validated['pet_weight']]);
+            }
+
             $calculatedSubtotal = 0;
             $itemsToCreate = [];
 
             foreach ($validated['items'] as $itemData) {
+                // Determine source-of-truth unit price and capture snapshot
                 if ($itemData['item_type'] === 'service') {
                     $service = \App\Models\Service::find($itemData['service_id']);
                     if ($service && $service->pricing_mode !== 'manual') {
-                        $itemData['unit_price'] = $this->pricingService->calculatePrice($service, $pet);
+                        try {
+                            $itemData['unit_price'] = $this->pricingService->calculatePrice($service, $pet, 1, null, $validated['pet_weight'] ?? null);
+                        } catch (\Exception $e) {
+                             throw ValidationException::withMessages(['items' => $e->getMessage()]);
+                        }
                     }
+                    $itemData['line_type'] = 'service';
+                    $itemData['reference_type'] = \App\Models\Service::class;
+                    $itemData['reference_id'] = $itemData['service_id'];
                 } else if ($itemData['item_type'] === 'inventory') {
                     $inventory = \App\Models\Inventory::find($itemData['inventory_id']);
                     if ($inventory) {
-                        // Use selling price as source of truth
                         $itemData['unit_price'] = (float) $inventory->selling_price;
                     }
+                    $itemData['line_type'] = 'item';
+                    $itemData['reference_type'] = \App\Models\Inventory::class;
+                    $itemData['reference_id'] = $itemData['inventory_id'];
                 }
 
-                $itemAmount = $itemData['unit_price'] * $itemData['qty'];
-                $calculatedSubtotal += $itemAmount;
-                $itemsToCreate[] = array_merge($itemData, ['amount' => $itemAmount]);
+                $isHidden = $itemData['is_hidden'] ?? false;
+                $isBillable = $itemData['is_billable'] ?? (!$isHidden);
+                
+                // Enforce 0 amount for hidden items
+                if ($isHidden) {
+                    $itemData['unit_price'] = 0;
+                    $itemAmount = 0;
+                } else {
+                    $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
+                }
+
+                $itemData['unit_price_snapshot'] = $itemData['unit_price'];
+                $itemData['line_total_snapshot'] = $itemAmount;
+                $itemData['is_billable'] = $isBillable;
+
+                $calculatedSubtotal += $isBillable ? $itemAmount : 0;
+                $itemsToCreate[] = $itemData;
             }
 
             // Recalculate total based on backend rules
@@ -105,12 +184,13 @@ class InvoiceController extends Controller
             $taxable = $calculatedSubtotal - $discount;
             // Enforce fixed 12% VAT
             $validated['tax_rate'] = 12.00;
-            $tax = $taxable * 0.12; 
-            $calculatedTotal = $taxable + $tax;
+            $tax = round($taxable * 0.12, 2); 
+            $calculatedTotal = round($taxable + $tax, 2);
 
             $invoice = Invoice::create([
                 'invoice_number' => $invoiceNumber,
                 'pet_id' => $validated['pet_id'],
+                'appointment_id' => $validated['appointment_id'],
                 'status' => $validated['status'],
                 'subtotal' => $calculatedSubtotal,
                 'discount_type' => $validated['discount_type'],
@@ -129,11 +209,36 @@ class InvoiceController extends Controller
             $invoice->load('items');
             $this->finalizationService->finalizeInvoice($invoice);
 
+            if ($invoice->status === 'Finalized') {
+                try {
+                    $owner = $invoice->pet->owner;
+                    if ($owner) {
+                        $this->clientNotificationService->sendFromTemplate(
+                            $owner,
+                            'invoice_finalized',
+                            'email',
+                            ['invoice_number' => $invoice->invoice_number, 'total' => $invoice->total],
+                            'automated',
+                            $invoice
+                        );
+                    }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::warning("Failed to send automated invoice notification: " . $e->getMessage());
+                }
+            }
+
             DB::commit();
             return response()->json($invoice->load('pet', 'items'), 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create invoice.', 'errors' => [$e->getMessage()]], 500);
+            \Illuminate\Support\Facades\Log::error("Invoice creation failed: " . $e->getMessage(), [
+                'stack' => $e->getTraceAsString(),
+                'payload' => $request->all()
+            ]);
+            return response()->json([
+                'message' => 'Failed to create invoice.', 
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
@@ -156,6 +261,8 @@ class InvoiceController extends Controller
 
         $validated = $request->validate([
             'status' => 'required|in:Draft,Finalized,Paid,Partially Paid,Cancelled',
+            'pet_weight' => 'nullable|numeric|min:0.01',
+            'appointment_id' => 'nullable|exists:appointments,id',
             'subtotal' => 'required|numeric|min:0',
             'discount_type' => 'required|in:percentage,fixed',
             'discount_value' => 'required|numeric|min:0',
@@ -174,13 +281,24 @@ class InvoiceController extends Controller
             'items.*.amount' => 'required_with:items|numeric|min:0',
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
+            'items.*.is_hidden' => 'sometimes|boolean',
         ]);
+
+        if (!empty($validated['appointment_id'])) {
+            $appt = \App\Models\Appointment::find($validated['appointment_id']);
+            if ($appt && $appt->pet_id != $invoice->pet_id) {
+                throw ValidationException::withMessages([
+                    'appointment_id' => 'This appointment belongs to a different pet.'
+                ]);
+            }
+        }
 
         if ($invoice->status === 'Finalized' && in_array($validated['status'], ['Draft', 'Finalized'])) {
              // If already finalized, only allow payment updates
              $invoice->update([
                  'amount_paid' => $validated['amount_paid'],
                  'payment_method' => $validated['payment_method'] ?? $invoice->payment_method,
+                 'appointment_id' => $validated['appointment_id'] ?? $invoice->appointment_id,
                  'status' => $validated['status']
              ]);
              return response()->json($invoice->load('pet', 'items'));
@@ -193,23 +311,51 @@ class InvoiceController extends Controller
             $calculatedSubtotal = 0;
             $itemsToUpdate = [];
 
+            if (isset($validated['pet_weight'])) {
+                $pet->update(['weight' => $validated['pet_weight']]);
+            }
+
             if (isset($validated['items'])) {
                 foreach ($validated['items'] as $itemData) {
                     if ($itemData['item_type'] === 'service') {
                         $service = \App\Models\Service::find($itemData['service_id']);
                         if ($service && $service->pricing_mode !== 'manual') {
-                            $itemData['unit_price'] = $this->pricingService->calculatePrice($service, $pet);
+                            try {
+                                $itemData['unit_price'] = $this->pricingService->calculatePrice($service, $pet, 1, null, $validated['pet_weight'] ?? null);
+                            } catch (\Exception $e) {
+                                 throw ValidationException::withMessages(['items' => $e->getMessage()]);
+                            }
                         }
+                        $itemData['line_type'] = 'service';
+                        $itemData['reference_type'] = \App\Models\Service::class;
+                        $itemData['reference_id'] = $itemData['service_id'];
                     } else if ($itemData['item_type'] === 'inventory') {
                         $inventory = \App\Models\Inventory::find($itemData['inventory_id']);
                         if ($inventory) {
                             $itemData['unit_price'] = (float) $inventory->selling_price;
                         }
+                        $itemData['line_type'] = 'item';
+                        $itemData['reference_type'] = \App\Models\Inventory::class;
+                        $itemData['reference_id'] = $itemData['inventory_id'];
                     }
 
-                    $itemAmount = $itemData['unit_price'] * $itemData['qty'];
-                    $calculatedSubtotal += $itemAmount;
-                    $itemsToUpdate[] = array_merge($itemData, ['amount' => $itemAmount]);
+                    $isHidden = $itemData['is_hidden'] ?? false;
+                    $isBillable = $itemData['is_billable'] ?? (!$isHidden);
+                    
+                    // Enforce 0 amount for hidden items
+                    if ($isHidden) {
+                        $itemData['unit_price'] = 0;
+                        $itemAmount = 0;
+                    } else {
+                        $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
+                    }
+
+                    $itemData['unit_price_snapshot'] = $itemData['unit_price'];
+                    $itemData['line_total_snapshot'] = $itemAmount;
+                    $itemData['is_billable'] = $isBillable;
+
+                    $calculatedSubtotal += $isBillable ? $itemAmount : 0;
+                    $itemsToUpdate[] = $itemData;
                 }
             } else {
                 $calculatedSubtotal = $invoice->subtotal;
@@ -238,6 +384,7 @@ class InvoiceController extends Controller
 
             $invoice->update([
                 'status' => $status,
+                'appointment_id' => $validated['appointment_id'] ?? $invoice->appointment_id,
                 'subtotal' => $calculatedSubtotal,
                 'discount_type' => $validated['discount_type'],
                 'discount_value' => $validated['discount_value'],
@@ -264,6 +411,24 @@ class InvoiceController extends Controller
 
             $invoice->load('items');
             $this->finalizationService->finalizeInvoice($invoice);
+
+            if ($invoice->wasChanged('status') && $invoice->status === 'Finalized') {
+                try {
+                    $owner = $invoice->pet->owner;
+                    if ($owner) {
+                        $this->clientNotificationService->sendFromTemplate(
+                            $owner,
+                            'invoice_finalized',
+                            'email',
+                            ['invoice_number' => $invoice->invoice_number, 'total' => $invoice->total],
+                            'automated',
+                            $invoice
+                        );
+                    }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::warning("Failed to send automated invoice notification: " . $e->getMessage());
+                }
+            }
 
             DB::commit();
             return response()->json($invoice->load('pet', 'items'));

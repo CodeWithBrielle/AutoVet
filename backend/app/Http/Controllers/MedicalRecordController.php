@@ -15,6 +15,13 @@ use Illuminate\Http\Request;
  */
 class MedicalRecordController extends Controller
 {
+    protected $clientNotificationService;
+
+    public function __construct(
+        \App\Services\ClientNotificationService $clientNotificationService
+    ) {
+        $this->clientNotificationService = $clientNotificationService;
+    }
     public function index(Request $request)
     {
         $query = MedicalRecord::with(['pet', 'vet']);
@@ -30,6 +37,7 @@ class MedicalRecordController extends Controller
     {
         $validated = $request->validate([
             'pet_id'          => 'required|exists:pets,id',
+            'appointment_id'  => 'required|exists:appointments,id',
             'vet_id'          => 'nullable|exists:users,id',
             'chief_complaint' => 'nullable|string',
             'findings'        => 'nullable|string',
@@ -48,6 +56,27 @@ class MedicalRecordController extends Controller
         }
 
         $record = MedicalRecord::create($validated);
+
+        try {
+            $record->load('pet.owner');
+            $owner = $record->pet->owner;
+            if ($owner) {
+                $this->clientNotificationService->sendFromTemplate(
+                    $owner,
+                    'medical_summary_notice',
+                    'email',
+                    [
+                        'pet_name' => $record->pet->name,
+                        'diagnosis' => $record->diagnosis ?: 'N/A'
+                    ],
+                    'automated',
+                    $record
+                );
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning("Failed to send automated medical record notification: " . $e->getMessage());
+        }
+
         return response()->json($record->load(['pet', 'vet']), 201);
     }
 
@@ -60,6 +89,7 @@ class MedicalRecordController extends Controller
     {
         $validated = $request->validate([
             'pet_id'          => 'required|exists:pets,id',
+            'appointment_id'  => 'required|exists:appointments,id',
             'vet_id'          => 'nullable|exists:users,id',
             'chief_complaint' => 'nullable|string',
             'findings'        => 'nullable|string',

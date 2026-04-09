@@ -8,9 +8,22 @@ use Illuminate\Http\Request;
 
 class AppointmentController extends Controller
 {
-    public function index()
+    protected $clientNotificationService;
+
+    public function __construct(
+        \App\Services\ClientNotificationService $clientNotificationService
+    ) {
+        $this->clientNotificationService = $clientNotificationService;
+    }
+    public function index(Request $request)
     {
-        return response()->json(Appointment::with(['pet', 'service', 'vet'])->orderBy('date', 'desc')->get());
+        $query = Appointment::with(['pet', 'service', 'vet'])->orderBy('date', 'desc');
+        
+        if ($request->has('pet_id')) {
+            $query->where('pet_id', $request->pet_id);
+        }
+        
+        return response()->json($query->get());
     }
 
     public function store(Request $request)
@@ -88,6 +101,28 @@ class AppointmentController extends Controller
         }
 
         $appointment = Appointment::create($validated);
+
+        try {
+            $appointment->load('pet.owner');
+            $owner = $appointment->pet->owner;
+            if ($owner) {
+                $this->clientNotificationService->sendFromTemplate(
+                    $owner,
+                    'appointment_created',
+                    'email',
+                    [
+                        'date' => $appointment->date,
+                        'time' => $appointment->time,
+                        'title' => $appointment->title
+                    ],
+                    'automated',
+                    $appointment
+                );
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning("Failed to send automated appointment notification: " . $e->getMessage());
+        }
+
         return response()->json($appointment->load(['pet', 'service', 'vet']), 201);
     }
 

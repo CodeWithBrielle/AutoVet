@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
+import { getAgeGroup } from "../../utils/petAgeGroups";
 
 const inputBase =
     "h-11 w-full rounded-xl border bg-slate-50 px-3 text-sm text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none dark:bg-dark-surface dark:text-zinc-200 dark:placeholder:text-gray-500 dark:focus:bg-gray-800";
@@ -111,7 +112,7 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
                 breed_id: patient.breed_id ? patient.breed_id.toString() : "",
                 date_of_birth: patient.date_of_birth ? patient.date_of_birth.substring(0, 10) : "",
                 sex: patient.sex || "Male",
-                age_group: patient.age_group || "Adult",
+                age_group: patient.age_group === "Puppy/Kitten" ? "Baby" : (patient.age_group === "Junior" ? "Young" : (patient.age_group || "Adult")),
                 color: patient.color || "",
                 weight: patient.weight || "",
                 weight_unit: patient.weight_unit || "kg",
@@ -133,8 +134,6 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
         }
     }, [patient, isOpen, reset]);
 
-    if (!isOpen || !patient) return null;
-
     const photoValue = watch("photo");
     const speciesIdValue = watch("species_id");
     const selectedSpecies = speciesList.find(s => s.id.toString() === speciesIdValue);
@@ -152,6 +151,7 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
 
     const weightValue = watch("weight");
     const breedIdValue = watch("breed_id");
+    const dobValue = watch("date_of_birth");
 
     useEffect(() => {
         if (breedIdValue && speciesIdValue) {
@@ -181,13 +181,29 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
     };
 
     const calculatedSizeId = calculateDynamicSize(weightValue, speciesIdValue);
-    const calculatedSizeName = sizeCategories.find(c => c.id.toString() === calculatedSizeId?.toString())?.name || "N/A";
+    const calculatedSizeName = sizeCategories.find(c => c.id.toString() === calculatedSizeId?.toString())?.name || (weightValue && speciesIdValue ? "Unclassified" : "N/A");
 
     useEffect(() => {
-        if (calculatedSizeId) {
-            setValue("size_category_id", calculatedSizeId.toString());
+        // If weight and species are present, strictly prioritize the computed size
+        if (weightValue && speciesIdValue) {
+            if (calculatedSizeId) {
+                setValue("size_category_id", calculatedSizeId.toString());
+            } else {
+                // If weight exists but no range matches, clear it to avoid contradicting manual data
+                setValue("size_category_id", "");
+            }
         }
-    }, [calculatedSizeId, setValue]);
+    }, [calculatedSizeId, weightValue, speciesIdValue, setValue]);
+
+    useEffect(() => {
+        if (speciesIdValue && dobValue) {
+            const speciesName = speciesList.find(s => s.id.toString() === speciesIdValue)?.name;
+            const computedAgeGroup = getAgeGroup(speciesName, dobValue);
+            setValue("age_group", computedAgeGroup, { shouldValidate: true });
+        } else if (!dobValue || !speciesIdValue) {
+            setValue("age_group", "Not yet determined");
+        }
+    }, [speciesIdValue, dobValue, speciesList, setValue]);
 
     const isMismatch = breedSuggestedSizeId && calculatedSizeId && breedSuggestedSizeId.toString() !== calculatedSizeId.toString();
 
@@ -259,6 +275,8 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
             setError(err.message);
         }
     };
+
+    if (!isOpen || !patient) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
@@ -347,17 +365,29 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
                                     </div>
                                     <div>
                                         <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400">Size Category</label>
-                                        <div className={clsx(
-                                            "flex flex-col justify-center rounded border px-3 py-1 text-xs font-medium transition-colors h-[34px]",
-                                            isMismatch ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20" : "border-slate-200 bg-slate-50 dark:border-dark-border dark:bg-dark-surface"
-                                        )}>
-                                            <div className="flex items-center justify-between">
-                                                <span className={clsx(isMismatch ? "text-amber-700 dark:text-amber-400" : "text-slate-700 dark:text-zinc-300")}>
-                                                    {calculatedSizeName}
-                                                </span>
-                                                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Auto</span>
+                                        {weightValue ? (
+                                            <div className={clsx(
+                                                "flex flex-col justify-center rounded border px-3 py-1 text-xs font-medium transition-colors min-h-[34px]",
+                                                isMismatch ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20" : "border-slate-200 bg-slate-50 dark:border-dark-border dark:bg-dark-surface"
+                                            )}>
+                                                <div className="flex items-center justify-between">
+                                                    <span className={clsx(isMismatch ? "text-amber-700 dark:text-amber-400 font-bold" : "text-slate-700 dark:text-zinc-300 font-bold")}>
+                                                        {calculatedSizeName}
+                                                    </span>
+                                                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Auto</span>
+                                                </div>
                                             </div>
-                                        </div>
+                                        ) : (
+                                            <div className="relative">
+                                                <select {...register("size_category_id")} className="h-[34px] w-full rounded border bg-slate-50 px-2 text-[11px] text-slate-700 focus:bg-white focus:outline-none appearance-none pr-6 dark:bg-dark-surface dark:text-zinc-200">
+                                                    <option value="">Manual Fallback...</option>
+                                                    {sizeCategories.map(cat => (
+                                                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                                    ))}
+                                                </select>
+                                                <FiChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
+                                            </div>
+                                        )}
                                         {isMismatch && (
                                             <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-500/80 leading-tight">
                                                 Breed default: {sizeCategories.find(c => c.id.toString() === breedSuggestedSizeId.toString())?.name}
@@ -374,13 +404,15 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
                                 </div>
                                 <div>
                                     <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400">Age Group</label>
-                                    <select {...register("age_group")} className={getSelectClass(errors.age_group)}>
-                                        <option value="">Select Age Group...</option>
-                                        <option>Puppy/Kitten</option>
-                                        <option>Junior</option>
-                                        <option>Adult</option>
-                                        <option>Senior</option>
-                                    </select>
+                                    <div className="flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-bold text-slate-700 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200">
+                                        <span>{watch("age_group") || "Not yet determined"}</span>
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Auto</span>
+                                    </div>
+                                    <input type="hidden" {...register("age_group")} />
+                                </div>
+                                <div>
+                                    <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400">Color</label>
+                                    <input {...register("color")} className={getInputClass(errors.color)} placeholder="e.g. Brindle, Merle, Black" />
                                 </div>
                                 <div>
                                     <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400">Status</label>

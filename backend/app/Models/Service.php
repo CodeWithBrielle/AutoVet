@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 class Service extends Model
 {
     use SoftDeletes, HasSyncFields, Archivable;
+    protected $connection = 'mysql';
     protected $fillable = [
         'name',
         'description',
@@ -21,6 +22,9 @@ class Service extends Model
         'professional_fee',
         'category',
         'status',
+        'show_on_invoice',
+        'auto_load_linked_items',
+        'allow_manual_item_override',
         // Archive tracking
         'deleted_by', 'restore_until',
         // Sync fields
@@ -40,6 +44,11 @@ class Service extends Model
     public function pricingRules()
     {
         return $this->hasMany(ServicePricingRule::class);
+    }
+
+    public function consumables()
+    {
+        return $this->hasMany(ServiceConsumable::class);
     }
 
     public function preventPermanentDeletionIfReferenced()

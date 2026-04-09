@@ -35,14 +35,41 @@ class InventoryController extends Controller
             'stock_level' => 'required|integer|min:0',
             'min_stock_level' => 'required|integer|min:0',
             'status' => 'required|string|max:255',
-            'price' => 'nullable|numeric|min:0',
-            'selling_price' => 'nullable|numeric|min:0',
+            'cost_price' => 'nullable|numeric|min:0',
+            'selling_price' => [
+                'nullable',
+                'numeric',
+                'min:0',
+                function ($attribute, $value, $fail) use ($request) {
+                    $categoryId = $request->input('inventory_category_id');
+                    $category = \App\Models\InventoryCategory::find($categoryId);
+                    $categoryName = $category ? $category->name : '';
+                    
+                    // Consumables and internal supplies don't strictly require a selling price
+                    $isConsumableOrSupply = in_array($categoryName, ['Consumables', 'Supplies', 'Grooming Supplies']);
+                    $isSellable = $request->boolean('is_sellable');
+                    $isServiceUsable = $request->boolean('is_service_usable');
+
+                    // If it's a billable item (Retail OR Service-billable like Vaccines), it needs a price
+                    if (!$isConsumableOrSupply && ($isSellable || $isServiceUsable)) {
+                        if ($value === null || $value === '') {
+                            $fail('The selling price is required for billable items.');
+                        }
+                    }
+                }
+            ],
             'supplier' => 'nullable|string|max:255',
             'expiration_date' => 'nullable|date',
-            'is_billable' => 'boolean',
-            'is_consumable' => 'boolean',
+            'is_sellable' => 'required|boolean',
+            'is_service_usable' => 'required|boolean',
             'deduct_on_finalize' => 'boolean',
         ]);
+
+        if ($request->boolean('is_sellable') === false && $request->boolean('is_service_usable') === false) {
+             if (empty($validatedData['selling_price']) && ($validatedData['selling_price'] ?? null) !== 0 && ($validatedData['selling_price'] ?? null) !== '0') {
+                 $validatedData['selling_price'] = 0;
+             }
+        }
 
         // Automatically generate SKU by resolving the category name
         $categoryRecord = \App\Models\InventoryCategory::find($validatedData['inventory_category_id']);
@@ -79,12 +106,31 @@ class InventoryController extends Controller
             'stock_level' => 'required|integer|min:0',
             'min_stock_level' => 'required|integer|min:0',
             'status' => 'required|string|max:255',
-            'price' => 'nullable|numeric|min:0',
-            'selling_price' => 'nullable|numeric|min:0',
+            'cost_price' => 'nullable|numeric|min:0',
+            'selling_price' => [
+                'nullable',
+                'numeric',
+                'min:0',
+                function ($attribute, $value, $fail) use ($request) {
+                    $categoryId = $request->input('inventory_category_id');
+                    $category = \App\Models\InventoryCategory::find($categoryId);
+                    $categoryName = $category ? $category->name : '';
+                    
+                    $isConsumableOrSupply = in_array($categoryName, ['Consumables', 'Supplies', 'Grooming Supplies']);
+                    $isSellable = $request->boolean('is_sellable');
+                    $isServiceUsable = $request->boolean('is_service_usable');
+
+                    if (!$isConsumableOrSupply && ($isSellable || $isServiceUsable)) {
+                        if ($value === null || $value === '') {
+                            $fail('The selling price is required for billable items.');
+                        }
+                    }
+                }
+            ],
             'supplier' => 'nullable|string|max:255',
             'expiration_date' => 'nullable|date',
-            'is_billable' => 'boolean',
-            'is_consumable' => 'boolean',
+            'is_sellable' => 'required|boolean',
+            'is_service_usable' => 'required|boolean',
             'deduct_on_finalize' => 'boolean',
         ]);
 

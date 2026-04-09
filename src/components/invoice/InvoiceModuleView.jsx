@@ -9,16 +9,28 @@ import {
   FiPrinter,
   FiSearch,
   FiSend,
+  FiBell,
 } from "react-icons/fi";
 import { LuPawPrint } from "react-icons/lu";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import { useFormErrors } from "../../hooks/useFormErrors";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import ManualSendModal from "../notifications/ManualSendModal";
 
 const currency = (value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value || 0);
 const pdfCurrency = (value) => "P " + (value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const formatDate = (date) => {
+  if (!date) return "N/A";
+  try {
+     return new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  } catch (e) {
+     return "N/A";
+  }
+};
 
 /* ───────────────────────────────────────── PDF Generation ── */
 async function generateInvoicePDF(invoiceData, patient, clinic) {
@@ -139,12 +151,16 @@ async function generateInvoicePDF(invoiceData, patient, clinic) {
       3: { halign: 'right', cellWidth: 35 },
     },
     head: [["DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]],
-    body: invoiceData.items.map(item => [
-      item.name.toUpperCase() + (item.notes ? "\n" + item.notes : ""),
-      item.qty,
-      (item.unitPrice || 0).toFixed(2),
-      (item.amount || 0).toFixed(2)
-    ]),
+    body: invoiceData.items.filter(item => !item.is_hidden).map(item => {
+      let subtitle = item.notes;
+      if (!subtitle && item.item_type === 'service') subtitle = 'Service Fee';
+      return [
+        item.name.toUpperCase() + (subtitle ? "\n" + subtitle : ""),
+        item.qty,
+        (item.unitPrice || item.unit_price || 0).toFixed(2),
+        (item.amount || 0).toFixed(2)
+      ]
+    }),
   });
 
   y = doc.lastAutoTable.finalY + 15;
@@ -202,6 +218,7 @@ async function generateInvoicePDF(invoiceData, patient, clinic) {
 function InvoiceModuleView() {
   const toast = useToast();
   const { user } = useAuth();
+  const { setLaravelErrors, clearErrors, getError } = useFormErrors();
   const [items, setItems] = useState([]);
   const [discountVal, setDiscountVal] = useState(0);
   const [discountType, setDiscountType] = useState("percentage");
@@ -211,13 +228,20 @@ function InvoiceModuleView() {
   const [selectedOwnerId, setSelectedOwnerId] = useState("");
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
+
+  // New state for appointments and selected appointment
+  const [appointments, setAppointments] = useState([]);
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState("");
   const [patientDetails, setPatientDetails] = useState(null);
   const [clinicSettings, setClinicSettings] = useState(null);
   const [notes, setNotes] = useState("");
   const [status, setStatus] = useState("Draft");
   const [isPreviewMode, setIsPreviewMode] = useState(false);
 
+  const [currentWeight, setCurrentWeight] = useState("");
+
   const [services, setServices] = useState([]);
+  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
 
   const [inventory, setInventory] = useState([]);
   const [weightRanges, setWeightRanges] = useState([]);
@@ -284,15 +308,35 @@ function InvoiceModuleView() {
   const handlePatientSelect = (e) => {
     const pId = e.target.value;
     setSelectedPatientId(pId);
+    setSelectedAppointmentId(""); // reset appointment selection
     if (!pId) {
       setPatientDetails(null);
+      setAppointments([]);
       return;
     }
     const patientData = (Array.isArray(pets) ? pets : []).find(p => p.id.toString() === pId.toString());
-    const ownerData = patientData?.owner;
-
+    
     // Simply use the raw patient data, the UI will access nested properties
     setPatientDetails(patientData);
+    setCurrentWeight(patientData?.weight || "");
+
+    // Fetch appointments for this patient
+    const headers = {
+      "Accept": "application/json",
+      "Authorization": `Bearer ${user?.token}`
+    };
+    fetch(`/api/appointments?pet_id=${pId}`, { headers })
+      .then(res => res.json())
+      .then(data => {
+        const appts = Array.isArray(data) ? data : [];
+        // Sort by date descending, take recent 5 + future
+        const sorted = appts.sort((a, b) => new Date(b.date) - new Date(a.date));
+        setAppointments(sorted);
+      })
+      .catch(err => {
+        console.error("Failed to load appointments", err);
+        setAppointments([]);
+      });
 
     // Auto replace placeholders in the notes if clinic template is present
     if (clinicSettings && clinicSettings.invoice_notes_template) {
@@ -304,7 +348,7 @@ function InvoiceModuleView() {
     }
   };
 
-  const subtotal = useMemo(() => items.reduce((sum, item) => sum + item.amount, 0), [items]);
+  const subtotal = useMemo(() => items.reduce((sum, item) => sum + (item.is_hidden ? 0 : item.amount), 0), [items]);
 
   // Real-time discount calculations safely capping out at subtotal
   const discountAmount = useMemo(() => {
@@ -339,7 +383,7 @@ function InvoiceModuleView() {
     ).map(s => ({ ...s, type: 'service' }));
 
     const filteredInventory = (Array.isArray(inventory) ? inventory : []).filter(i => 
-      i.is_billable && (
+      i.is_sellable && (
         i.item_name.toLowerCase().includes(term) || 
         i.sku?.toLowerCase().includes(term) ||
         i.category?.toLowerCase().includes(term)
@@ -360,11 +404,14 @@ function InvoiceModuleView() {
     if (service.pricing_type === "weight_based" && patientDetails?.weight !== null) {
       const petWeight = Number(patientDetails.weight);
       const range = weightRanges.find(r => 
+        (Number(r.species_id) === Number(petSpeciesId)) &&
         Number(r.min_weight) <= petWeight && 
         (r.max_weight === null || Number(r.max_weight) >= petWeight)
       );
-      if (range) {
-        const rule = service.pricing_rules?.find(r => r.basis_type === 'weight' && r.reference_id === range.id);
+      
+      if (range && range.size_category_id) {
+        // NEW mapping: weight_based rules now use basis_type 'size' and the size_category_id from the range
+        const rule = service.pricing_rules?.find(r => r.basis_type === 'size' && r.reference_id === range.size_category_id);
         if (rule) return Number(rule.price);
       }
     }
@@ -372,15 +419,27 @@ function InvoiceModuleView() {
     return Number(service.professional_fee || service.price) || 0;
   };
 
-  const selectItemFromDropdown = (item) => {
+  const selectItemFromDropdown = async (item) => {
     setServiceInput(item.name);
+    setSelectedService(item);
+    setIsDropdownOpen(false);
+
     if (item.type === 'service') {
-      setPriceInput(calculateDynamicPrice(item));
+      try {
+        const headers = {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${user.token}`
+        };
+        const res = await fetch(`/api/invoices/resolve-breakdown?service_id=${item.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`, { headers });
+        if (!res.ok) throw new Error("Breakdown failed");
+        const breakdown = await res.json();
+        setPriceInput(breakdown.professional_fee);
+      } catch (e) {
+        setPriceInput(calculateDynamicPrice(item));
+      }
     } else {
       setPriceInput(item.selling_price ?? 0);
     }
-    setSelectedService(item);
-    setIsDropdownOpen(false);
   };
 
   const handleServiceChange = (e) => {
@@ -397,7 +456,7 @@ function InvoiceModuleView() {
     }
 
     // Check inventory
-    const matchedInv = inventory.find(i => i.item_name.toLowerCase() === val.toLowerCase() && i.is_billable);
+    const matchedInv = inventory.find(i => i.item_name.toLowerCase() === val.toLowerCase() && i.is_sellable);
     if (matchedInv) {
       setPriceInput(matchedInv.selling_price ?? 0);
       setSelectedService({ ...matchedInv, name: matchedInv.item_name, type: 'inventory' });
@@ -408,10 +467,58 @@ function InvoiceModuleView() {
   };
 
 
-  const manuallyAddItem = () => {
+  const addServiceLineItems = (itemName, breakdown, service) => {
+    const timestamp = Date.now();
+    const newItems = [];
+
+    // 1. The Professional Fee line
+    newItems.push({
+      id: `li-svc-${timestamp}`,
+      name: itemName,
+      item_type: 'service',
+      service_id: service.id,
+      line_type: 'service',
+      notes: "Professional Fee",
+      qty: qtyInput,
+      unitPrice: breakdown.professional_fee,
+      amount: breakdown.professional_fee * qtyInput,
+      indicator: "bg-blue-400",
+      is_hidden: service.show_on_invoice === false,
+      is_billable: service.show_on_invoice !== false,
+      metadata_snapshot: breakdown.metadata || {}
+    });
+
+    // 2. The Item lines (Linked Consumables)
+    if (breakdown.item_lines && breakdown.item_lines.length > 0) {
+      breakdown.item_lines.forEach((line, idx) => {
+        const inv = inventory.find(i => i.id === line.inventory_id);
+        const itemQty = line.quantity; 
+        const isBillable = line.is_billable;
+        const unitPrice = line.unit_price;
+
+        newItems.push({
+          id: `li-item-${timestamp}-${idx}`,
+          name: inv?.item_name || "Linked Item",
+          item_type: 'inventory',
+          inventory_id: line.inventory_id,
+          line_type: 'item',
+          notes: line.notes || `Linked to ${itemName}`,
+          qty: itemQty,
+          unitPrice: unitPrice,
+          amount: unitPrice * itemQty,
+          indicator: "bg-emerald-400",
+          is_hidden: !isBillable,
+          is_billable: isBillable,
+          can_modify: service.allow_manual_item_override !== false
+        });
+      });
+    }
+
+    setItems((prev) => [...prev, ...newItems]);
+  };
+
+  const manuallyAddItem = async () => {
     if (!serviceInput) return;
-    const price = Number(priceInput) || 0;
-    const qty = Number(qtyInput) || 1;
     
     let itemName = serviceInput;
     let itemType = selectedService?.type || 'service';
@@ -422,19 +529,20 @@ function InvoiceModuleView() {
        itemName = `${serviceInput} (${patientDetails.weight}kg)`;
     }
       
-    const newItem = {
-      id: `li-${Date.now()}`,
-      name: itemName,
-      item_type: itemType,
-      service_id: serviceId,
-      inventory_id: inventoryId,
-      notes: itemType === 'inventory' ? "Inventory Product" : "Service",
-      qty: qty,
-      unitPrice: price,
-      amount: price * qty,
-      indicator: itemType === 'inventory' ? "bg-emerald-400" : "bg-blue-400",
-    };
-    setItems((prev) => [...prev, newItem]);
+      const newItem = {
+        id: `li-${Date.now()}`,
+        name: serviceInput,
+        item_type: itemType,
+        inventory_id: itemType === 'inventory' ? selectedService?.id : null,
+        notes: itemType === 'inventory' ? "Inventory Product" : "Manual Adjustment",
+        qty: qty,
+        unitPrice: price,
+        amount: price * qty,
+        indicator: itemType === 'inventory' ? "bg-emerald-400" : "bg-slate-400",
+      };
+      setItems((prev) => [...prev, newItem]);
+    }
+
     setServiceInput("");
     setQtyInput(1);
     setPriceInput(50);
@@ -493,6 +601,8 @@ function InvoiceModuleView() {
 
     const payload = {
       pet_id: selectedPatientId,
+      appointment_id: selectedAppointmentId || null,
+      pet_weight: currentWeight || null,
       status: actualStatus,
       subtotal: subtotal,
       discount_type: discountType,
@@ -504,15 +614,25 @@ function InvoiceModuleView() {
       notes_to_client: notes,
       items: items.map(item => ({
         item_type: item.item_type || 'service',
+        line_type: item.line_type || (item.item_type === 'service' ? 'service' : 'item'),
         service_id: item.service_id,
         inventory_id: item.inventory_id,
         name: item.name,
         notes: item.notes,
         qty: item.qty,
         unit_price: item.unitPrice,
-        amount: item.amount
+        amount: item.amount,
+        is_hidden: !!item.is_hidden,
+        is_billable: item.is_billable ?? !item.is_hidden,
+        unit_price_snapshot: item.unitPrice,
+        line_total_snapshot: item.amount,
+        metadata_snapshot: item.metadata_snapshot || null
       }))
     };
+    if (!selectedAppointmentId) {
+      toast.error("Please select an appointment for this invoice.");
+      return;
+    }
 
     try {
       const response = await fetch("/api/invoices", {
@@ -525,9 +645,19 @@ function InvoiceModuleView() {
         body: JSON.stringify(payload)
       });
 
+      clearErrors();
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to save invoice");
+        if (response.status === 422) {
+          setLaravelErrors(errorData);
+          toast.error("Validation error. Please check specified fields.");
+        } else {
+          // Extract specific error if backend provided it
+          const detail = errorData.error || errorData.message || "Failed to save invoice";
+          throw new Error(detail);
+        }
+        return;
       }
 
       toast.success(`Invoice ${finalStatus === "Draft" ? "saved as draft" : "finalized"} successfully.`);
@@ -572,7 +702,9 @@ function InvoiceModuleView() {
                       onChange={(e) => {
                         setSelectedOwnerId(e.target.value);
                         setSelectedPatientId(""); // reset pet
+                        setSelectedAppointmentId(""); // reset appointment
                         setPatientDetails(null);
+                        setAppointments([]);
                       }}
                       className="h-11 w-full appearance-none rounded-xl border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface pl-10 pr-8 text-sm text-slate-700 dark:text-zinc-300 focus:outline-none"
                       disabled={status === "Finalized"}
@@ -592,7 +724,10 @@ function InvoiceModuleView() {
                       value={selectedPatientId}
                       onChange={handlePatientSelect}
                       disabled={!selectedOwnerId || status === "Finalized"}
-                      className="h-11 w-full appearance-none rounded-xl border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface pl-4 pr-8 text-sm text-slate-700 dark:text-zinc-300 focus:outline-none disabled:opacity-50"
+                      className={clsx(
+                        "h-11 w-full appearance-none rounded-xl border pl-4 pr-8 text-sm focus:outline-none disabled:opacity-50 dark:bg-dark-surface dark:text-zinc-300",
+                        getError("pet_id") ? "border-rose-500 bg-rose-50/10" : "border-slate-200 dark:border-dark-border bg-slate-50"
+                      )}
                     >
                       <option value="">Select a pet...</option>
                       {(Array.isArray(pets) ? pets : []).filter(p => p.owner_id?.toString() === selectedOwnerId?.toString()).map(p => (
@@ -602,10 +737,46 @@ function InvoiceModuleView() {
                       ))}
                     </select>
                     <FiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-zinc-500" />
+                    {getError("pet_id") && <p className="mt-1 text-xs font-medium text-rose-500">{getError("pet_id")}</p>}
                   </div>
 
-                  {patientDetails && (
+                  <div className="relative">
+                    <select
+                      value={selectedAppointmentId}
+                      onChange={(e) => setSelectedAppointmentId(e.target.value)}
+                      disabled={!selectedPatientId || status === "Finalized"}
+                      className={clsx(
+                        "h-11 w-full appearance-none rounded-xl border pl-4 pr-8 text-sm focus:outline-none disabled:opacity-50 dark:bg-dark-surface dark:text-zinc-300",
+                        getError("appointment_id") ? "border-rose-500 bg-rose-50/10" : "border-slate-200 dark:border-dark-border bg-slate-50"
+                      )}
+                    >
+                      <option value="">Select an appointment...</option>
+                      {appointments.map(appt => (
+                        <option key={appt.id} value={appt.id}>
+                          {formatDate(appt.date)} {appt.time ? `@ ${appt.time}` : ""} - {appt.title}
+                        </option>
+                      ))}
+                    </select>
+                    <FiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-zinc-500" />
+                    {getError("appointment_id") && <p className="mt-1 text-xs font-medium text-rose-500">{getError("appointment_id")}</p>}
+                  </div>
+
+                   {patientDetails && (
                     <div className="rounded-xl border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface p-3 text-sm">
+                      <div className="mb-3 flex items-center justify-between">
+                         <strong className="text-slate-700 dark:text-zinc-300">Weight Override (kg)</strong>
+                         <input 
+                            type="number" 
+                            step="0.01" 
+                            value={currentWeight} 
+                            onChange={(e) => {
+                               setCurrentWeight(e.target.value);
+                               // Force price recalculation for items in the list?
+                               // For simplicity, we just update the state and newly added items will use it.
+                            }}
+                            className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-center font-bold text-blue-600 focus:outline-none dark:bg-dark-card dark:border-dark-border"
+                         />
+                      </div>
                       <p className="text-slate-500 dark:text-zinc-400"><strong className="text-slate-700 dark:text-zinc-300">Owner:</strong> {patientDetails.owner?.name}</p>
                       <p className="text-slate-500 dark:text-zinc-400"><strong className="text-slate-700 dark:text-zinc-300">Contact:</strong> {patientDetails.owner?.phone || "N/A"}</p>
                       <p className="text-slate-500 dark:text-zinc-400"><strong className="text-slate-700 dark:text-zinc-300">Email:</strong> {patientDetails.owner?.email || "N/A"}</p>
@@ -740,15 +911,33 @@ function InvoiceModuleView() {
                             {item.name}
                             <span className={clsx(
                               "ml-2 text-[10px] uppercase px-1.5 py-0.5 rounded-md font-bold",
-                              item.item_type === 'inventory' ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
+                              item.item_type === 'inventory' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                             )}>
                               {item.item_type === 'inventory' ? 'Product' : 'Service'}
                             </span>
+                            {item.is_hidden && (
+                              <span className="ml-1 text-[10px] uppercase px-1.5 py-0.5 rounded-md font-bold bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                Internal
+                              </span>
+                            )}
                           </p>
                           <p className="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">{item.notes}</p>
                         </div>
-                        <p className="text-2xl font-semibold text-slate-900 dark:text-zinc-50">{currency(item.amount)}</p>
+                        <div className="text-right">
+                          <p className="text-2xl font-semibold text-slate-900 dark:text-zinc-50">{currency(item.amount)}</p>
+                          {status === "Draft" && (
+                            <button onClick={() => removeItem(item.id)} className="mt-1 text-xs font-semibold text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300">
+                              Remove
+                            </button>
+                          )}
+                        </div>
                       </div>
+
+                      {item.is_hidden && (
+                          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 italic">
+                            This item is used for internal tracking and inventory deduction. It will not appear on the client's printed invoice.
+                          </div>
+                      )}
 
                       {item.warning ? (
                         <span className="mt-2 inline-block rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
@@ -851,6 +1040,14 @@ function InvoiceModuleView() {
                 <FiSend className="h-4 w-4" />
                 Finalize &amp; Send
               </button>
+              <button
+                onClick={() => setIsSendModalOpen(true)}
+                disabled={status === "Draft"}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-100 dark:bg-dark-surface px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-zinc-300 hover:bg-slate-200 disabled:opacity-50"
+              >
+                <FiBell className="h-4 w-4" />
+                Notify Client
+              </button>
             </div>
           </div>
 
@@ -943,7 +1140,7 @@ function InvoiceModuleView() {
                 </div>
 
                 <div className="mt-3 space-y-3">
-                  {items.map((item) => (
+                  {items.filter(item => !item.is_hidden).map((item) => (
                     <div key={`doc-${item.id}`} className="grid grid-cols-[1fr_60px_100px_100px] items-start gap-2 border-b border-slate-100 dark:border-dark-border pb-3 last:border-0 last:pb-0">
                       <div>
                         <div className="flex items-center gap-2">
@@ -955,7 +1152,9 @@ function InvoiceModuleView() {
                             {item.item_type === 'inventory' ? 'PROD' : 'SERV'}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 dark:text-zinc-400">{item.notes}</p>
+                        <p className="text-xs text-slate-500 dark:text-zinc-400">
+                          {item.notes || (item.item_type === 'service' ? 'Service Fee' : '')}
+                        </p>
                       </div>
                       <input
                         type="number"
@@ -1044,6 +1243,13 @@ function InvoiceModuleView() {
           </div>
         </section>
       </div>
+      <ManualSendModal 
+        isOpen={isSendModalOpen} 
+        onClose={() => setIsSendModalOpen(false)} 
+        owner={patientDetails?.owner}
+        relatedObject={null}
+        relatedType="App\Models\Invoice"
+      />
     </div>
   );
 }
