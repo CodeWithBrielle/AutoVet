@@ -39,7 +39,7 @@ class PricingService
                 $lineTotal = $unitPrice * $lineQty;
 
                 $itemLines[] = [
-                    'name' => $consumable->inventory->name ?? 'Unknown Item',
+                    'name' => $consumable->inventory->item_name ?? 'Unknown Item',
                     'type' => 'item',
                     'line_type' => 'item',
                     'reference_type' => \App\Models\Inventory::class,
@@ -112,7 +112,9 @@ class PricingService
                 }
             }
 
-            throw new \Exception("No pricing rule configured for weight '{$petWeight}kg' (Species: {$pet->species_id}) for service '{$service->name}'.");
+            // Fallback to base fee if no specific range/rule found for weight-based service
+            // This prevents the entire invoice breakdown from failing.
+            return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
         }
 
         // Final fallback: Use professional_fee or legacy price

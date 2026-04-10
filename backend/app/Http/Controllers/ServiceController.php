@@ -34,8 +34,16 @@ class ServiceController extends Controller
                 'array',
                 function ($attribute, $value, $fail) use ($request) {
                     $eligibleCategories = [
-                        "Vaccination", "Grooming", "Medicine", "Preventive Care", 
-                        "Consultation", "Surgery", "Diagnostic", "Laboratory", "Anesthesia", "Other"
+                        "Vaccination",
+                        "Grooming",
+                        "Medicine",
+                        "Preventive Care",
+                        "Consultation",
+                        "Surgery",
+                        "Diagnostic",
+                        "Laboratory",
+                        "Anesthesia",
+                        "Other"
                     ];
                     if (!empty($value) && !in_array($request->input('category'), $eligibleCategories)) {
                         $fail('Linked inventory items are only allowed for categories: ' . implode(', ', $eligibleCategories) . '.');
@@ -44,21 +52,26 @@ class ServiceController extends Controller
                     // Strict Price Validation
                     foreach ($value as $item) {
                         $inventory = \App\Models\Inventory::find($item['inventory_id']);
-                        if (!$inventory) continue;
+                        if (!$inventory)
+                            continue;
+
+                        if (!$inventory->is_service_usable) {
+                            $fail("The linked item '{$inventory->item_name}' must be marked as usable in services.");
+                        }
 
                         if (!($inventory->cost_price > 0)) {
                             $fail("The linked item '{$inventory->item_name}' must have a valid cost price configured in inventory.");
                         }
 
-                        if (!empty($item['is_billable']) && !($inventory->selling_price > 0)) {
-                            $fail("The linked item '{$inventory->item_name}' is marked as billable but has no selling price configured.");
+                        if ($item['billing_behavior'] === 'separately_billable' && !($inventory->selling_price > 0)) {
+                            $fail("The linked item '{$inventory->item_name}' is marked as separately billable but has no selling price configured.");
                         }
                     }
                 },
             ],
             'linked_items.*.inventory_id' => 'required|integer|exists:inventories,id',
             'linked_items.*.quantity' => 'required|numeric|min:0.01',
-            'linked_items.*.is_billable' => 'required|boolean',
+            'linked_items.*.billing_behavior' => 'required|string|in:included,separately_billable,internal_only',
             'linked_items.*.is_required' => 'required|boolean',
             'linked_items.*.auto_deduct' => 'required|boolean',
             'linked_items.*.notes' => 'nullable|string',
@@ -110,8 +123,16 @@ class ServiceController extends Controller
                 'array',
                 function ($attribute, $value, $fail) use ($request) {
                     $eligibleCategories = [
-                        "Vaccination", "Grooming", "Medicine", "Preventive Care", 
-                        "Consultation", "Surgery", "Diagnostic", "Laboratory", "Anesthesia", "Other"
+                        "Vaccination",
+                        "Grooming",
+                        "Medicine",
+                        "Preventive Care",
+                        "Consultation",
+                        "Surgery",
+                        "Diagnostic",
+                        "Laboratory",
+                        "Anesthesia",
+                        "Other"
                     ];
                     if (!empty($value) && !in_array($request->input('category'), $eligibleCategories)) {
                         $fail('Linked inventory items are only allowed for categories: ' . implode(', ', $eligibleCategories) . '.');
@@ -120,21 +141,26 @@ class ServiceController extends Controller
                     // Strict Price Validation
                     foreach ($value as $item) {
                         $inventory = \App\Models\Inventory::find($item['inventory_id']);
-                        if (!$inventory) continue;
+                        if (!$inventory)
+                            continue;
+
+                        if (!$inventory->is_service_usable) {
+                            $fail("The linked item '{$inventory->item_name}' must be marked as usable in services.");
+                        }
 
                         if (!($inventory->cost_price > 0)) {
                             $fail("The linked item '{$inventory->item_name}' must have a valid cost price configured in inventory.");
                         }
 
-                        if (!empty($item['is_billable']) && !($inventory->selling_price > 0)) {
-                            $fail("The linked item '{$inventory->item_name}' is marked as billable but has no selling price configured.");
+                        if ($item['billing_behavior'] === 'separately_billable' && !($inventory->selling_price > 0)) {
+                            $fail("The linked item '{$inventory->item_name}' is marked as separately billable but has no selling price configured.");
                         }
                     }
                 },
             ],
             'linked_items.*.inventory_id' => 'required|integer|exists:inventories,id',
             'linked_items.*.quantity' => 'required|numeric|min:0.01',
-            'linked_items.*.is_billable' => 'required|boolean',
+            'linked_items.*.billing_behavior' => 'required|string|in:included,separately_billable,internal_only',
             'linked_items.*.is_required' => 'required|boolean',
             'linked_items.*.auto_deduct' => 'required|boolean',
             'linked_items.*.notes' => 'nullable|string',

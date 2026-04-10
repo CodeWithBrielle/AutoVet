@@ -22,9 +22,16 @@ function MetricCard({ card }) {
         ) : null}
       </div>
 
-      <p className="text-5xl font-bold leading-tight text-slate-900 dark:text-zinc-50">{card.value}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-700 dark:text-zinc-200">{card.title}</p>
-      <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">{card.detail}</p>
+      <div className="flex flex-col gap-1">
+        <p className={clsx(
+          "font-black tracking-tight text-slate-900 dark:text-zinc-50 leading-none break-all",
+          card.value.length > 12 ? "text-2xl" : card.value.length > 8 ? "text-3xl" : "text-4xl"
+        )}>
+          {card.value}
+        </p>
+        <p className="text-xl font-bold text-slate-700 dark:text-zinc-200 uppercase tracking-wide">{card.title}</p>
+      </div>
+      <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 leading-relaxed">{card.detail}</p>
     </article>
   );
 }

@@ -86,14 +86,14 @@ function AppLayout() {
         onClose={() => setIsSidebarOpen(false)}
       />
 
-      <div className="md:pl-64">
+      <div className="md:pl-64 flex flex-col min-h-screen">
         <TopHeader
           title={pageTitle}
           user={user}
           onMenuToggle={() => setIsSidebarOpen((prev) => !prev)}
         />
 
-        <main className="p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 w-full p-4 sm:p-6 lg:p-10 mx-auto">
           <Outlet context={{ user, setUser }} />
         </main>
       </div>

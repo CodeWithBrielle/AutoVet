@@ -29,6 +29,27 @@ trait HasAuditTrail
         }
     }
 
+    /**
+     * Log a manual action not tied to a specific model event.
+     */
+    public static function logManual($action, $modelType = 'System', $modelId = 0, $old = null, $new = null)
+    {
+        try {
+            AuditLog::create([
+                'user_id' => Auth::id(),
+                'action' => $action,
+                'model_type' => $modelType,
+                'model_id' => $modelId,
+                'old_values' => $old,
+                'new_values' => $new,
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Failed to log manual audit: ' . $e->getMessage());
+        }
+    }
+
     protected static function logAudit($model, $action)
     {
         try {
@@ -56,10 +77,10 @@ trait HasAuditTrail
                 'action' => $action,
                 'model_type' => get_class($model),
                 'model_id' => $model->getKey(),
-                'old_values' => empty($oldValues) ? null : json_encode($oldValues),
-                'new_values' => empty($newValues) ? null : json_encode($newValues),
-                'ip_address' => Request::ip(),
-                'user_agent' => Request::userAgent(),
+                'old_values' => empty($oldValues) ? null : $oldValues,
+                'new_values' => empty($newValues) ? null : $newValues,
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
             ]);
         } catch (\Exception $e) {
             // Do not break the main transaction if audit logging fails

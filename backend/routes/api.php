@@ -196,5 +196,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/patients/species-distribution',  [\App\Http\Controllers\PatientReportController::class, 'getSpeciesDistribution']);
         Route::get('/patients/registration-trends',   [\App\Http\Controllers\PatientReportController::class, 'getRegistrationTrends']);
         Route::get('/patients/demographics',          [\App\Http\Controllers\PatientReportController::class, 'getDemographics']);
+        
+        // Inventory Analytics
+        Route::get('/inventory/summary',              [\App\Http\Controllers\InventoryAnalyticsController::class, 'getSummary']);
+        Route::get('/inventory/top-moving',           [\App\Http\Controllers\InventoryAnalyticsController::class, 'getTopMoving']);
+        Route::get('/inventory/recent-movements',     [\App\Http\Controllers\InventoryAnalyticsController::class, 'getRecentMovements']);
+        Route::get('/inventory/expiring-soon',        [\App\Http\Controllers\InventoryAnalyticsController::class, 'getExpiringSoon']);
     });
 });

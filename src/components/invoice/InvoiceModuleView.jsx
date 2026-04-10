@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import clsx from "clsx";
 import {
   FiCalendar,
@@ -10,6 +10,7 @@ import {
   FiSearch,
   FiSend,
   FiBell,
+  FiXCircle,
 } from "react-icons/fi";
 import { LuPawPrint } from "react-icons/lu";
 import { useToast } from "../../context/ToastContext";
@@ -17,7 +18,8 @@ import { useAuth } from "../../context/AuthContext";
 import { useFormErrors } from "../../hooks/useFormErrors";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import html2canvas from "html2canvas";
+import PrintableInvoice from "./PrintableInvoice";
 import ManualSendModal from "../notifications/ManualSendModal";
 
 const currency = (value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value || 0);
@@ -33,186 +35,30 @@ const formatDate = (date) => {
 };
 
 /* ───────────────────────────────────────── PDF Generation ── */
-async function generateInvoicePDF(invoiceData, patient, clinic) {
-  const doc = new jsPDF();
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-
-  // 1. Light Theme Background (White)
-  doc.setFillColor(255, 255, 255); 
-  doc.rect(0, 0, pageW, pageH, "F");
-
-  let y = 15;
-
-  // 2. Header Section
-  if (clinic?.clinic_logo) {
-    try {
-      doc.addImage(clinic.clinic_logo, 'PNG', 14, y, 16, 16, undefined, 'FAST');
-    } catch (e) {
-      console.error("PDF Logo error:", e);
-    }
+async function generateInvoicePDF(element, filename = 'invoice.pdf') {
+  if (!element) return;
+  
+  try {
+    const canvas = await html2canvas(element, {
+      scale: 2, // Higher quality
+      useCORS: true,
+      logging: false,
+      backgroundColor: "#ffffff"
+    });
+    
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const canvasHeight = canvas.height;
+    const canvasWidth = canvas.width;
+    const pdfHeight = (canvasHeight * pdfWidth) / canvasWidth;
+    
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    pdf.save(filename);
+  } catch (err) {
+    console.error("PDF Generation Error:", err);
+    throw new Error("Failed to generate PDF document.");
   }
-
-  // Clinic Info (Left Aligned)
-  doc.setTextColor(30, 41, 59); // Slate-800 (Dark)
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
-  doc.text(clinic?.clinic_name || "AutoVet Clinic", 34, y + 8);
-  
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(100, 116, 139); // Slate-500
-  doc.text(clinic?.address || "", 34, y + 13);
-  doc.text([clinic?.phone_number, clinic?.primary_email].filter(Boolean).join(" • "), 34, y + 17);
-
-  // Invoice Title (Right Aligned)
-  doc.setTextColor(203, 213, 225); // Light slate for the word "INVOICE"
-  doc.setFontSize(28);
-  doc.setFont("helvetica", "bold");
-  doc.text("INVOICE", pageW - 14, y + 10, { align: "right" });
-
-  doc.setFontSize(9);
-  doc.setTextColor(30, 41, 59);
-  doc.text(`#${invoiceData.invoice_number || "VB-2026-000"}`, pageW - 14, y + 18, { align: "right" });
-  doc.setTextColor(100, 116, 139);
-  doc.text(`Date: ${new Date().toLocaleDateString()}`, pageW - 14, y + 23, { align: "right" });
-  doc.text(`Due: Upon Receipt`, pageW - 14, y + 28, { align: "right" });
-
-  y = 55;
-
-  // 3. Invoice Sections
-  // Bill To Box
-  doc.setTextColor(100, 116, 139);
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "bold");
-  doc.text("BILL TO", 14, y);
-  
-  doc.setTextColor(30, 41, 59);
-  doc.setFontSize(12);
-  doc.text(patient?.owner?.name || "Guest Client", 14, y + 7);
-  
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(100, 116, 139);
-  doc.text(patient?.owner?.address || "No address", 14, y + 13);
-  doc.text(patient?.owner?.email || "", 14, y + 18);
-  doc.text(patient?.owner?.phone || "", 14, y + 23);
-
-  // Patient Card (Subtle Gray Box)
-  const patientCardX = 110;
-  doc.setFillColor(248, 250, 252); // Slate-50 (Very light gray)
-  doc.roundedRect(patientCardX - 4, y - 4, 90, 32, 4, 4, "F");
-  
-  doc.setTextColor(100, 116, 139);
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "bold");
-  doc.text("PATIENT", patientCardX, y + 2);
-
-  if (patient) {
-    const photoUrl = patient.photo ? getActualPetImageUrl(patient.photo) : getPetImageUrl(patient.species?.name, patient.breed?.name);
-    if (photoUrl) {
-      try {
-          doc.addImage(photoUrl, 'JPEG', patientCardX, y + 5, 10, 10);
-      } catch(e){
-        console.error("PDF Patient Image error:", e);
-      }
-    }
-  }
-
-  doc.setTextColor(30, 41, 59);
-  doc.setFontSize(10);
-  doc.text(patient?.name || "N/A", patientCardX + 13, y + 10);
-  doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.text(`${patient?.species?.name || ""} • ${patient?.breed?.name || ""}`, patientCardX + 13, y + 15);
-
-  y += 45;
-
-  // 4. Line Items Table (Clean Light Design)
-  autoTable(doc, {
-    startY: y,
-    theme: "striped",
-    styles: {
-      fillColor: [255, 255, 255],
-      textColor: [30, 41, 59],
-      cellPadding: 4,
-      fontSize: 9,
-    },
-    headStyles: {
-      fillColor: [37, 99, 235], // Blue header for branding
-      textColor: [255, 255, 255],
-      fontStyle: "bold",
-      fontSize: 8,
-    },
-    columnStyles: {
-      0: { halign: 'left' }, 
-      1: { halign: 'right', cellWidth: 20 },
-      2: { halign: 'right', cellWidth: 30 },
-      3: { halign: 'right', cellWidth: 35 },
-    },
-    head: [["DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]],
-    body: invoiceData.items.filter(item => !item.is_hidden).map(item => {
-      let subtitle = item.notes;
-      if (!subtitle && item.item_type === 'service') subtitle = 'Service Fee';
-      return [
-        item.name.toUpperCase() + (subtitle ? "\n" + subtitle : ""),
-        item.qty,
-        (item.unitPrice || item.unit_price || 0).toFixed(2),
-        (item.amount || 0).toFixed(2)
-      ]
-    }),
-  });
-
-  y = doc.lastAutoTable.finalY + 15;
-
-  // 5. Totals Section
-  const totalsX = pageW - 14;
-  doc.setTextColor(100, 116, 139);
-  doc.setFontSize(9);
-  
-  // Subtotal
-  doc.text("Subtotal", totalsX - 40, y, { align: "right" });
-  doc.setTextColor(30, 41, 59);
-  doc.text(pdfCurrency(invoiceData.subtotal), totalsX, y, { align: "right" });
-  
-  // Fixed VAT 12%
-  y += 6;
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(100, 116, 139);
-  doc.text("VAT (12%)", totalsX - 40, y, { align: "right" });
-  doc.setTextColor(30, 41, 59);
-  doc.text(pdfCurrency(invoiceData.subtotal * 0.12), totalsX, y, { align: "right" });
-
-  // Total Due
-  y += 12;
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(30, 41, 59);
-  doc.text("Total Due", totalsX - 45, y, { align: "right" });
-  doc.setTextColor(37, 99, 235); // Blue-600 Highlight
-  doc.text(pdfCurrency(invoiceData.total), totalsX, y, { align: "right" });
-
-  // 6. Notes Footer
-  if (invoiceData.notes_to_client || invoiceData.notes) {
-    y += 20;
-    doc.setTextColor(100, 116, 139);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    doc.text("NOTES TO CLIENT", 14, y);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(30, 41, 59);
-    const splitNotes = doc.splitTextToSize(invoiceData.notes_to_client || invoiceData.notes, 140);
-    doc.text(splitNotes, 14, y + 6);
-  }
-
-  // Final Footer
-  doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text("Powered by AutoVet Systems", pageW / 2, pageH - 10, { align: "center" });
-
-  doc.save(`Invoice_${invoiceData.invoice_number || "VB-2026-000"}.pdf`);
 }
 
 function InvoiceModuleView() {
@@ -220,6 +66,7 @@ function InvoiceModuleView() {
   const { user } = useAuth();
   const { setLaravelErrors, clearErrors, getError } = useFormErrors();
   const [items, setItems] = useState([]);
+  const [expandedItems, setExpandedItems] = useState({});
   const [discountVal, setDiscountVal] = useState(0);
   const [discountType, setDiscountType] = useState("percentage");
 
@@ -245,6 +92,8 @@ function InvoiceModuleView() {
 
   const [inventory, setInventory] = useState([]);
   const [weightRanges, setWeightRanges] = useState([]);
+  const processedApptsRef = useRef(new Set());
+  const printableRef = useRef(null);
 
   useEffect(() => {
     if (!user?.token) return;
@@ -278,8 +127,8 @@ function InvoiceModuleView() {
           setPets(petsData);
         }
 
-        setClinicSettings(settingsData);
         setNotes(settingsData?.invoice_notes_template || "");
+        setClinicSettings(settingsData);
         setServices(Array.isArray(servicesData) ? servicesData : []);
         setInventory(Array.isArray(inventoryData) ? inventoryData : []);
       })
@@ -304,11 +153,18 @@ function InvoiceModuleView() {
         setWeightRanges([]);
       });
   }, [user?.token]);
+  
+  // Diagnostic state watcher
+  useEffect(() => {
+    console.log("[DEBUG] Invoice Items State Updated:", items);
+  }, [items]);
 
   const handlePatientSelect = (e) => {
     const pId = e.target.value;
     setSelectedPatientId(pId);
     setSelectedAppointmentId(""); // reset appointment selection
+    setItems([]); // Clear previous patient's items
+    if (processedApptsRef.current) processedApptsRef.current.clear();
     if (!pId) {
       setPatientDetails(null);
       setAppointments([]);
@@ -348,7 +204,12 @@ function InvoiceModuleView() {
     }
   };
 
-  const subtotal = useMemo(() => items.reduce((sum, item) => sum + (item.is_hidden ? 0 : item.amount), 0), [items]);
+  const subtotal = useMemo(() => items.reduce((sum, item) => {
+    if (item.billing_behavior !== 'separately_billable' && item.billing_behavior !== undefined) return sum;
+    if (item.is_hidden) return sum;
+    if (item.is_removed_from_template || item.is_confirmed_used === false) return sum;
+    return sum + (item.amount || 0);
+  }, 0), [items]);
 
   // Real-time discount calculations safely capping out at subtotal
   const discountAmount = useMemo(() => {
@@ -364,9 +225,38 @@ function InvoiceModuleView() {
   const taxable = useMemo(() => subtotal - discountAmount, [subtotal, discountAmount]);
   const taxAmount = useMemo(() => taxable * 0.12, [taxable]);
   const totalDue = useMemo(() => taxable + taxAmount, [taxable, taxAmount]);
+  
+  const reviewWarnings = useMemo(() => {
+    const warnings = [];
+    
+    // 1. Removed items
+    const removedCount = items.filter(i => i.is_removed_from_template).length;
+    if (removedCount > 0) {
+      warnings.push({ type: 'info', message: `${removedCount} item(s) were removed from the service template.` });
+    }
+
+    // 2. Overrides
+    const priceOverrides = items.filter(i => i.was_price_overridden).length;
+    if (priceOverrides > 0) {
+      warnings.push({ type: 'warning', message: `${priceOverrides} item(s) have manual price overrides.` });
+    }
+
+    // 3. Stock checks
+    items.forEach(item => {
+      if (item.item_type === 'inventory' && !item.is_removed_from_template) {
+        const inv = inventory.find(i => i.id === Number(item.inventory_id));
+        if (inv && Number(inv.stock_level) < Number(item.qty)) {
+          warnings.push({ type: 'error', message: `Insufficient stock for ${item.name}. (Available: ${inv.stock_level})` });
+        }
+      }
+    });
+
+    return warnings;
+  }, [items, inventory]);
 
   const [amountPaid, setAmountPaid] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState("");
+  const [amountPaidInput, setAmountPaidInput] = useState("0");
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
 
   const [serviceInput, setServiceInput] = useState("");
   const [qtyInput, setQtyInput] = useState(1);
@@ -485,6 +375,12 @@ function InvoiceModuleView() {
       indicator: "bg-blue-400",
       is_hidden: service.show_on_invoice === false,
       is_billable: service.show_on_invoice !== false,
+      billing_behavior: service.show_on_invoice === false ? 'internal_only' : 'separately_billable',
+      source_type: 'custom', // Manually added service use custom source
+      is_confirmed_used: true,
+      is_removed_from_template: false,
+      was_price_overridden: false,
+      was_quantity_overridden: false,
       metadata_snapshot: breakdown.metadata || {}
     });
 
@@ -509,7 +405,14 @@ function InvoiceModuleView() {
           indicator: "bg-emerald-400",
           is_hidden: !isBillable,
           is_billable: isBillable,
-          can_modify: service.allow_manual_item_override !== false
+          billing_behavior: line.billing_behavior || (isBillable ? 'separately_billable' : 'internal_only'),
+          source_type: 'custom',
+          is_confirmed_used: true,
+          is_removed_from_template: false,
+          was_price_overridden: false,
+          was_quantity_overridden: false,
+          can_modify: service.allow_manual_item_override !== false,
+          parent_id: `li-svc-${timestamp}`
         });
       });
     }
@@ -526,22 +429,61 @@ function InvoiceModuleView() {
     let inventoryId = itemType === 'inventory' ? selectedService?.id : null;
 
     if (itemType === 'service' && selectedService?.pricing_type === "weight_based" && patientDetails?.weight !== null) {
-       itemName = `${serviceInput} (${patientDetails.weight}kg)`;
+      itemName = `${serviceInput} (${patientDetails.weight}kg)`;
     }
-      
-      const newItem = {
-        id: `li-${Date.now()}`,
-        name: serviceInput,
-        item_type: itemType,
-        inventory_id: itemType === 'inventory' ? selectedService?.id : null,
-        notes: itemType === 'inventory' ? "Inventory Product" : "Manual Adjustment",
-        qty: qty,
-        unitPrice: price,
-        amount: price * qty,
-        indicator: itemType === 'inventory' ? "bg-emerald-400" : "bg-slate-400",
-      };
-      setItems((prev) => [...prev, newItem]);
+
+    // Duplicate Check
+    const isDuplicate = items.some(i => 
+      !i.is_removed_from_template && 
+      ((serviceId && i.service_id === serviceId && i.item_type === 'service') || 
+       (inventoryId && i.inventory_id === inventoryId && i.item_type === 'inventory'))
+    );
+
+    if (isDuplicate) {
+      toast.error(`${itemName} is already in the invoice.`);
+      setSelectedService(null);
+      setServiceInput("");
+      return;
     }
+
+    if (itemType === 'service' && selectedService) {
+      // If we have a selected service, we should use the breakdown to add linked items
+      try {
+        const headers = { "Accept": "application/json", "Authorization": `Bearer ${user.token}` };
+        const res = await fetch(`/api/invoices/resolve-breakdown?service_id=${selectedService.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`, { headers });
+        if (res.ok) {
+          const breakdown = await res.json();
+          addServiceLineItems(itemName, breakdown, selectedService);
+          // Reset inputs and return
+          setServiceInput("");
+          setQtyInput(1);
+          setPriceInput(50);
+          setSelectedService(null);
+          return;
+        }
+      } catch (e) {
+        console.error("Manual add breakdown failed, falling back to flat item", e);
+      }
+    }
+
+    const newItem = {
+      id: `li-${Date.now()}`,
+      name: itemName,
+      item_type: itemType,
+      inventory_id: inventoryId,
+      notes: itemType === 'inventory' ? "Inventory Product" : "Manual Adjustment",
+      qty: qtyInput,
+      unitPrice: priceInput,
+      amount: priceInput * qtyInput,
+      indicator: itemType === 'inventory' ? "bg-emerald-400" : "bg-slate-400",
+      billing_behavior: 'separately_billable',
+      source_type: 'manual',
+      is_confirmed_used: true,
+      is_removed_from_template: false,
+      was_price_overridden: Number(priceInput) !== (selectedService?.price || 50),
+      was_quantity_overridden: Number(qtyInput) !== 1
+    };
+    setItems((prev) => [...prev, newItem]);
 
     setServiceInput("");
     setQtyInput(1);
@@ -550,7 +492,20 @@ function InvoiceModuleView() {
   };
 
   const removeItem = (id) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+    setItems((prev) => prev.map((item) => {
+      if (item.id === id) {
+        if (item.source_type === 'appointment_template' || item.client_id) {
+           return { ...item, is_removed_from_template: true, is_confirmed_used: false };
+        }
+      }
+      return item;
+    }).filter(item => {
+      // Really remove from array if it was pure manual and not saved yet
+      if (item.id === id && item.source_type === 'manual' && !item.client_id) {
+        return false;
+      }
+      return true;
+    }));
   };
 
   const updateItem = (id, field, value) => {
@@ -560,6 +515,8 @@ function InvoiceModuleView() {
           const updated = { ...item, [field]: value };
           if (field === "qty" || field === "unitPrice") {
             updated.amount = Number(updated.qty || 0) * Number(updated.unitPrice || 0);
+            if (field === "qty") updated.was_quantity_overridden = true;
+            if (field === "unitPrice") updated.was_price_overridden = true;
           }
           return updated;
         }
@@ -570,13 +527,15 @@ function InvoiceModuleView() {
 
   const resetForm = () => {
     setItems([]);
+    if (processedApptsRef.current) processedApptsRef.current.clear();
     setDiscountVal(0);
     setNotes(clinicSettings ? clinicSettings.invoice_notes_template || "" : "");
     setSelectedPatientId("");
     setPatientDetails(null);
     setStatus("Draft");
     setAmountPaid(0);
-    setPaymentMethod("");
+    setAmountPaidInput("0");
+    setPaymentMethod("Cash");
   };
 
   const submitInvoice = async (finalStatus) => {
@@ -613,6 +572,7 @@ function InvoiceModuleView() {
       payment_method: paymentMethod,
       notes_to_client: notes,
       items: items.map(item => ({
+        client_id: item.id,
         item_type: item.item_type || 'service',
         line_type: item.line_type || (item.item_type === 'service' ? 'service' : 'item'),
         service_id: item.service_id,
@@ -623,10 +583,16 @@ function InvoiceModuleView() {
         unit_price: item.unitPrice,
         amount: item.amount,
         is_hidden: !!item.is_hidden,
-        is_billable: item.is_billable ?? !item.is_hidden,
+        billing_behavior: item.billing_behavior || 'separately_billable',
+        source_type: item.source_type || 'manual',
+        is_confirmed_used: item.is_confirmed_used ?? true,
+        is_removed_from_template: item.is_removed_from_template ?? false,
+        was_price_overridden: item.was_price_overridden ?? false,
+        was_quantity_overridden: item.was_quantity_overridden ?? false,
         unit_price_snapshot: item.unitPrice,
         line_total_snapshot: item.amount,
-        metadata_snapshot: item.metadata_snapshot || null
+        metadata_snapshot: item.metadata_snapshot || null,
+        parent_invoice_id: item.parent_id || null // Add client-side parent ID
       }))
     };
     if (!selectedAppointmentId) {
@@ -664,6 +630,7 @@ function InvoiceModuleView() {
 
       if (finalStatus !== "Draft") {
         setStatus(actualStatus);
+        setIsPreviewMode(true); // Automatically switch to preview mode on finalization
       } else {
         resetForm();
       }
@@ -743,7 +710,117 @@ function InvoiceModuleView() {
                   <div className="relative">
                     <select
                       value={selectedAppointmentId}
-                      onChange={(e) => setSelectedAppointmentId(e.target.value)}
+                      onChange={(e) => {
+                        const newApptId = e.target.value;
+                        if (!newApptId || newApptId === selectedAppointmentId) {
+                          setSelectedAppointmentId(newApptId);
+                          return;
+                        }
+                        setSelectedAppointmentId(newApptId);
+                        
+                        if (newApptId) {
+                          const appt = appointments.find(a => a.id.toString() === newApptId.toString());
+                          if (appt && appt.service) {
+                            // Auto-load service into invoice
+                            const headers = { "Accept": "application/json", "Authorization": `Bearer ${user?.token}` };
+                            const targetUrl = `/api/invoices/resolve-breakdown?service_id=${appt.service_id}&pet_id=${selectedPatientId || ""}&qty=1&weight=${currentWeight || ""}`;
+                            console.log("[DEBUG] Fetching breakdown from:", targetUrl);
+                            
+                            fetch(targetUrl, { headers })
+                              .then(res => {
+                                if (!res.ok) {
+                                  return res.json().then(data => {
+                                    console.error("[ERROR] API Response Body:", data);
+                                    const detailedMsg = data.errors ? Object.values(data.errors).flat().join(", ") : (data.message || "Failed to resolve pricing");
+                                    throw new Error(detailedMsg);
+                                  });
+                                }
+                                return res.json();
+                              })
+                              .then(breakdown => {
+                                console.log("[DEBUG] Breakdown Received:", breakdown);
+                                const timestamp = Date.now();
+                                const newItems = [];
+                                
+                                const fee = Number(breakdown.professional_fee) || 0;
+                                newItems.push({
+                                  id: `li-svc-${timestamp}`,
+                                  name: appt.service.name,
+                                  item_type: 'service',
+                                  service_id: appt.service.id,
+                                  line_type: 'service',
+                                  notes: "From Appointment",
+                                  qty: 1,
+                                  unitPrice: fee,
+                                  amount: fee * 1,
+                                  indicator: "bg-blue-400",
+                                  is_hidden: appt.service.show_on_invoice === false,
+                                  is_billable: appt.service.show_on_invoice !== false,
+                                  billing_behavior: appt.service.show_on_invoice === false ? 'internal_only' : 'separately_billable',
+                                  source_type: 'appointment_template',
+                                  is_confirmed_used: true,
+                                  is_removed_from_template: false,
+                                  was_price_overridden: false,
+                                  was_quantity_overridden: false,
+                                  metadata_snapshot: { ...(breakdown.metadata || {}), auto_loaded: true }
+                                });
+                                
+                                if (breakdown.item_lines && breakdown.item_lines.length > 0) {
+                                  breakdown.item_lines.forEach((line, idx) => {
+                                    const inv = inventory.find(i => i.id === line.inventory_id);
+                                    const uPrice = Number(line.unit_price) || 0;
+                                    const lQty = Number(line.quantity) || 1;
+
+                                    newItems.push({
+                                      id: `li-item-${timestamp}-${idx}`,
+                                      name: inv?.item_name || line.name || "Linked Item",
+                                      item_type: 'inventory',
+                                      inventory_id: line.inventory_id,
+                                      line_type: 'item',
+                                      notes: "Template Applied",
+                                      qty: lQty,
+                                      unitPrice: uPrice,
+                                      amount: uPrice * lQty,
+                                      indicator: "bg-emerald-400",
+                                      is_hidden: !line.is_billable,
+                                      is_billable: line.is_billable,
+                                      billing_behavior: line.billing_behavior || (line.is_billable ? 'separately_billable' : 'internal_only'),
+                                      source_type: 'appointment_template',
+                                      is_confirmed_used: true,
+                                      is_removed_from_template: false,
+                                      was_price_overridden: false,
+                                      was_quantity_overridden: false,
+                                      can_modify: appt.service.allow_manual_item_override !== false,
+                                      parent_id: `li-svc-${timestamp}`
+                                    });
+                                  });
+                                }
+                                
+                                 console.log("[DEBUG] Constructed newItems:", newItems);
+                                 
+                                 // Prevent duplicate insertion if already exists
+                                 setItems(prev => {
+                                   const exists = prev.some(i => i.service_id === appt.service_id && !i.is_removed_from_template);
+                                   if (exists) {
+                                     console.warn("[DEBUG] Service already exists in items, skipping.");
+                                     toast.error("Service from appointment is already in the invoice.");
+                                     return prev;
+                                   }
+                                   
+                                   processedApptsRef.current.add(newApptId);
+                                   toast.success(`${appt.service.name} auto-loaded from appointment.`);
+                                   const updated = [...prev, ...newItems];
+                                   console.log("[DEBUG] Successfully added items. New count:", updated.length);
+                                   return updated;
+                                 });
+                              })
+                              .catch(err => {
+                                console.error("[ERROR] Failed to resolve breakdown for auto-load:", err);
+                                toast.error(err.message || "Failed to load service pricing.");
+                              });
+                          }
+                        }
+                      }}
                       disabled={!selectedPatientId || status === "Finalized"}
                       className={clsx(
                         "h-11 w-full appearance-none rounded-xl border pl-4 pr-8 text-sm focus:outline-none disabled:opacity-50 dark:bg-dark-surface dark:text-zinc-300",
@@ -796,6 +873,27 @@ function InvoiceModuleView() {
                   )}
                 </div>
               </section>
+
+              {reviewWarnings.length > 0 && (
+                <section className="rounded-2xl border border-amber-100 bg-amber-50/50 p-4 dark:border-amber-900/20 dark:bg-amber-900/10">
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-amber-700 dark:text-amber-500 flex items-center gap-2">
+                    <FiBell className="h-3 w-3" /> Pre-Finalization Review
+                  </h3>
+                  <ul className="space-y-2">
+                    {reviewWarnings.map((w, idx) => (
+                      <li key={idx} className={clsx(
+                        "text-[11px] font-medium flex gap-2",
+                        w.type === 'error' ? "text-rose-600 dark:text-rose-400" : 
+                        w.type === 'warning' ? "text-amber-700 dark:text-amber-500" : 
+                        "text-slate-500 dark:text-zinc-400"
+                      )}>
+                        <span>•</span>
+                        {w.message}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
               <section>
                 <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-400">Services &amp; Meds</h3>
@@ -902,7 +1000,7 @@ function InvoiceModuleView() {
                 </div>
 
                 <div className="mt-3 space-y-2">
-                  {items.length > 0 ? items.map((item) => (
+                  {items.length > 0 ? items.filter(i => !i.parent_id).map((item) => (
                     <article key={item.id} className="rounded-xl border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -920,18 +1018,113 @@ function InvoiceModuleView() {
                                 Internal
                               </span>
                             )}
+                            {item.metadata_snapshot?.auto_loaded && (
+                              <span className="ml-1 text-[10px] uppercase px-1.5 py-0.5 rounded-md font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
+                                From Appointment
+                              </span>
+                            )}
+                            {item.is_removed_from_template && (
+                              <span className="ml-1 text-[10px] uppercase px-1.5 py-0.5 rounded-md font-bold bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400">
+                                Removed
+                              </span>
+                            )}
                           </p>
-                          <p className="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">{item.notes}</p>
+                            <p className="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">{item.notes}</p>
+                            
+                            {items.filter(i => i.parent_id === item.id).length > 0 && (
+                              <button 
+                                onClick={() => setExpandedItems(prev => ({...prev, [item.id]: expandedItems[item.id] === false}))}
+                                className="mt-2 text-xs font-semibold text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-colors"
+                              >
+                                {expandedItems[item.id] !== false ? <FiChevronDown className="rotate-180 transition-transform" /> : <FiChevronDown className="transition-transform" />}
+                                {items.filter(i => i.parent_id === item.id).length} Linked Items
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <p className={clsx("text-2xl font-semibold text-slate-900 dark:text-zinc-50 leading-none", item.is_removed_from_template && "line-through opacity-50")}>{currency(item.amount)}</p>
+                            {status === "Draft" && (
+                              item.is_removed_from_template ? (
+                                <button onClick={() => {
+                                  setItems(prev => prev.map(p => p.id === item.id || p.parent_id === item.id ? { ...p, is_removed_from_template: false, is_confirmed_used: true } : p));
+                                }} className="mt-1 text-xs font-semibold text-emerald-500 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300">
+                                  Restore
+                                </button>
+                              ) : (
+                                <button onClick={() => {
+                                  removeItem(item.id);
+                                  items.filter(i => i.parent_id === item.id).forEach(c => removeItem(c.id));
+                                }} className="mt-1 text-xs font-semibold text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300">
+                                  Remove
+                                </button>
+                              )
+                            )}
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-semibold text-slate-900 dark:text-zinc-50">{currency(item.amount)}</p>
-                          {status === "Draft" && (
-                            <button onClick={() => removeItem(item.id)} className="mt-1 text-xs font-semibold text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300">
-                              Remove
-                            </button>
-                          )}
+
+                      {/* Children section */}
+                      {expandedItems[item.id] !== false && items.filter(i => i.parent_id === item.id).length > 0 && (
+                        <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-dark-border space-y-2">
+                          {items.filter(i => i.parent_id === item.id).map(child => (
+                            <div key={child.id} className="flex items-center justify-between rounded-lg bg-white dark:bg-dark-card border border-slate-100 dark:border-dark-border p-2 shadow-sm relative overflow-hidden group">
+                              <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-400 opacity-80" />
+                              <div className="min-w-0 pl-2 flex flex-col">
+                                <p className="text-sm font-semibold text-slate-800 dark:text-zinc-200 flex items-center gap-2">
+                                  {child.name}
+                                  <span className="text-[10px] bg-slate-100 text-slate-500 px-1 py-0.5 rounded font-bold dark:bg-slate-800 dark:text-slate-400">
+                                    Template Applied
+                                  </span>
+                                  {child.is_hidden && (
+                                     <span className="text-[10px] bg-slate-100 text-slate-500 px-1 py-0.5 rounded font-bold dark:bg-slate-800 dark:text-slate-400">
+                                       Internal Only
+                                     </span>
+                                  )}
+                                  {child.is_removed_from_template && (
+                                     <span className="text-[10px] bg-rose-100 text-rose-700 px-1 py-0.5 rounded font-bold dark:bg-rose-900/30 dark:text-rose-400">
+                                       Removed
+                                     </span>
+                                  )}
+                                </p>
+                                <p className="text-xs text-slate-500">{child.notes}</p>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                  <div className="flex items-center flex-col justify-end gap-0.5 min-w-[120px]">
+                                      <p className="text-sm text-slate-900 font-bold dark:text-zinc-50 leading-none">{currency(child.amount)}</p>
+                                      <div className={clsx("text-[10px] font-medium text-slate-400 flex items-center gap-1", child.is_removed_from_template && "opacity-50 line-through")}>
+                                          {child.can_modify && status === "Draft" && !child.is_removed_from_template ? (
+                                            <div className="flex items-center gap-1">
+                                              <span>Qty:</span>
+                                              <input 
+                                                type="number"
+                                                min="0.01" step="0.01"
+                                                value={child.qty}
+                                                onChange={e => updateItem(child.id, 'qty', e.target.value)}
+                                                className="w-10 rounded border border-slate-200 px-1 text-center py-0 focus:border-blue-500 outline-none h-4 dark:bg-dark-card"
+                                              />
+                                            </div>
+                                          ) : (
+                                            <span>{child.qty} qty</span>
+                                          )}
+                                          <span>•</span>
+                                          <span>{currency(child.unitPrice)}</span>
+                                      </div>
+                                  </div>
+                                {status === "Draft" && child.can_modify && (
+                                  child.is_removed_from_template ? (
+                                    <button onClick={() => setItems(prev => prev.map(p => p.id === child.id ? { ...p, is_removed_from_template: false, is_confirmed_used: true } : p))} className="p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 transition-colors opacity-100 text-xs font-bold">
+                                      Restore
+                                    </button>
+                                  ) : (
+                                    <button onClick={() => removeItem(child.id)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors opacity-0 group-hover:opacity-100">
+                                      <FiXCircle size={14} />
+                                    </button>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      </div>
+                      )}
 
                       {item.is_hidden && (
                           <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 italic">
@@ -994,16 +1187,25 @@ function InvoiceModuleView() {
               <button 
                 onClick={() => setIsPreviewMode(!isPreviewMode)}
                 className={clsx(
-                  "inline-flex items-center gap-2 font-semibold transition-colors px-3 py-1.5 rounded-lg",
+                  "inline-flex items-center gap-2 font-semibold transition-colors px-3 py-1.5 rounded-lg no-print",
                   isPreviewMode ? "bg-blue-600 text-white" : "text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-dark-surface"
                 )}
               >
                 <FiEye className="h-4 w-4" />
                 {isPreviewMode ? "Exit Preview" : "Preview Mode"}
               </button>
-              <span>Invoice Status: <b className="text-slate-700 dark:text-slate-300">{status}</b></span>
+              <span className="no-print">Invoice Status: <b className="text-slate-700 dark:text-slate-300">{status}</b></span>
+              {status !== "Draft" && (
+                <button
+                  onClick={() => resetForm()}
+                  className="inline-flex items-center gap-2 font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 px-3 py-1.5 rounded-lg transition-colors no-print"
+                >
+                  <FiPlusCircle className="h-4 w-4" />
+                  New Invoice
+                </button>
+              )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 no-print">
               <button
                 onClick={() => window.print()}
                 className="rounded-lg p-2 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-dark-surface dark:bg-zinc-950"
@@ -1011,22 +1213,20 @@ function InvoiceModuleView() {
                 <FiPrinter className="h-4 w-4" />
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (items.length === 0) {
                     toast.error("Add items before downloading PDF.");
                     return;
                   }
-                  const invoiceData = {
-                    invoice_number: "DRAFT-" + Date.now(),
-                    subtotal,
-                    tax_rate: 12.00,
-                    discount_value: discountVal,
-                    discount_type: discountType,
-                    total: totalDue,
-                    notes_to_client: notes,
-                    items: items
-                  };
-                  generateInvoicePDF(invoiceData, patientDetails, clinicSettings);
+                  
+                  toast.info("Generating PDF, please wait...");
+                  try {
+                    const filename = `Invoice_${status}_${Date.now()}.pdf`;
+                    await generateInvoicePDF(printableRef.current, filename);
+                    toast.success("Invoice downloaded successfully.");
+                  } catch (e) {
+                    toast.error("Failed to generate PDF.");
+                  }
                 }}
                 className="rounded-lg p-2 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-dark-surface dark:bg-zinc-950"
               >
@@ -1156,30 +1356,32 @@ function InvoiceModuleView() {
                           {item.notes || (item.item_type === 'service' ? 'Service Fee' : '')}
                         </p>
                       </div>
-                      <input
-                        type="number"
-                        min="1"
-                        value={item.qty}
-                        onChange={(e) => updateItem(item.id, "qty", e.target.value)}
-                        disabled={status !== "Draft"}
-                        className="w-full bg-transparent text-right text-sm text-slate-700 focus:outline-none focus:border-b focus:border-blue-500 disabled:opacity-50 dark:text-zinc-300"
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.unitPrice}
-                        onChange={(e) => updateItem(item.id, "unitPrice", e.target.value)}
-                        disabled={status !== "Draft"}
-                        className="w-full bg-transparent text-right text-sm text-slate-700 focus:outline-none focus:border-b focus:border-blue-500 disabled:opacity-50 dark:text-zinc-300"
-                      />
+                      {status === "Draft" && !isPreviewMode ? (
+                        <>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.qty}
+                            onChange={(e) => updateItem(item.id, "qty", e.target.value)}
+                            className="w-full bg-transparent text-right text-sm text-slate-700 focus:outline-none focus:border-b focus:border-blue-500 dark:text-zinc-300"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.unitPrice}
+                            onChange={(e) => updateItem(item.id, "unitPrice", e.target.value)}
+                            className="w-full bg-transparent text-right text-sm text-slate-700 focus:outline-none focus:border-b focus:border-blue-500 dark:text-zinc-300"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-right text-sm text-slate-700 dark:text-zinc-300">{item.qty}</p>
+                          <p className="text-right text-sm text-slate-700 dark:text-zinc-300">{currency(item.unitPrice)}</p>
+                        </>
+                      )}
                       <div className="flex items-center justify-end gap-2">
                         <p className="text-right text-sm font-semibold text-slate-900 dark:text-zinc-50">{currency(item.amount)}</p>
-                        {status === "Draft" && (
-                          <button onClick={() => removeItem(item.id)} className="text-rose-400 hover:text-rose-600 dark:text-rose-500 dark:hover:text-rose-300">
-                            <span className="text-[10px] font-bold leading-none">✕</span>
-                          </button>
-                        )}
                       </div>
                     </div>
                   ))}
@@ -1189,7 +1391,7 @@ function InvoiceModuleView() {
                 </div>
               </section>
 
-              <section className="mt-6 ml-auto w-full max-w-sm space-y-2">
+<section className="mt-6 ml-auto w-full max-w-sm space-y-2">
                 <div className="flex items-center justify-between text-sm text-slate-600 dark:text-zinc-300">
                   <span>Subtotal</span>
                   <span>{currency(subtotal)}</span>
@@ -1204,30 +1406,79 @@ function InvoiceModuleView() {
                 </div>
 
                 <div className="mt-6 border-t border-slate-200 dark:border-dark-border pt-4">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 mb-2">Record Payment</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      disabled={status !== "Draft"}
-                      className="h-9 w-full rounded-lg border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface px-3 text-sm text-slate-700 dark:text-zinc-300 disabled:opacity-50"
-                    >
-                      <option value="">Select Method...</option>
-                      <option value="Cash">Cash</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                    </select>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-zinc-500 text-sm">₱</span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={amountPaid}
-                        onChange={(e) => setAmountPaid(Number(e.target.value))}
-                        disabled={status !== "Draft"}
-                        placeholder="Amount Paid"
-                        className="h-9 w-full rounded-lg border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface pl-7 pr-3 text-sm text-slate-700 dark:text-zinc-300 disabled:opacity-50"
-                      />
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 mb-2">Payment Details</p>
+                  
+                  {status === "Draft" && !isPreviewMode ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="h-9 w-full flex items-center rounded-lg border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface px-3">
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 mr-2">Method:</span>
+                        <span className="text-sm font-bold text-slate-700 dark:text-zinc-300">Cash</span>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-zinc-500 text-sm">₱</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={amountPaidInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                              setAmountPaidInput(val);
+                              const numVal = parseFloat(val);
+                              setAmountPaid(!isNaN(numVal) ? numVal : 0);
+                            }
+                          }}
+                          onBlur={() => {
+                            if (amountPaidInput === "" || isNaN(parseFloat(amountPaidInput))) {
+                              setAmountPaidInput("0");
+                              setAmountPaid(0);
+                            } else {
+                              const numVal = parseFloat(amountPaidInput);
+                              setAmountPaidInput(numVal.toString());
+                              setAmountPaid(numVal);
+                            }
+                          }}
+                          onFocus={(e) => {
+                            if (amountPaidInput === "0") {
+                              setAmountPaidInput("");
+                            }
+                            e.target.select();
+                          }}
+                          placeholder="Amount Paid"
+                          className="h-9 w-full rounded-lg border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface pl-7 pr-3 text-sm text-slate-700 dark:text-zinc-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                      </div>
                     </div>
+                  ) : (
+                    <div className="flex flex-col gap-1 text-sm text-slate-700 dark:text-zinc-300">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Method</span>
+                        <span className="font-bold">{paymentMethod || "Not Recorded"}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-slate-100 dark:border-dark-border pb-1">
+                        <span className="text-slate-500">Amount Paid</span>
+                        <span className="font-bold">{currency(amountPaid)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Balance / Change Calculation Display */}
+                  <div className="mt-3 space-y-1">
+                    {amountPaid > totalDue ? (
+                      <div className="flex justify-between text-sm">
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-tighter text-[10px]">Change</span>
+                        <span className="font-black text-emerald-600 dark:text-emerald-400 text-lg">{currency(amountPaid - totalDue)}</span>
+                      </div>
+                    ) : amountPaid < totalDue && amountPaid > 0 ? (
+                      <div className="flex justify-between text-sm">
+                        <span className="font-bold text-rose-500 dark:text-rose-400 uppercase tracking-tighter text-[10px]">Balance Due</span>
+                        <span className="font-black text-rose-500 dark:text-rose-400 text-lg">{currency(totalDue - amountPaid)}</span>
+                      </div>
+                    ) : amountPaid === totalDue && totalDue > 0 ? (
+                      <div className="text-right">
+                        <span className="inline-block px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[10px] font-black uppercase tracking-widest">Fully Paid</span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </section>
@@ -1243,6 +1494,7 @@ function InvoiceModuleView() {
           </div>
         </section>
       </div>
+
       <ManualSendModal 
         isOpen={isSendModalOpen} 
         onClose={() => setIsSendModalOpen(false)} 
@@ -1250,6 +1502,27 @@ function InvoiceModuleView() {
         relatedObject={null}
         relatedType="App\Models\Invoice"
       />
+
+      <div className="hidden-for-preview">
+        <div ref={printableRef}>
+          <PrintableInvoice 
+            data={{
+              invoice_number: status === "Draft" ? `DRAFT-${Date.now()}` : "VB-2026-04-0001",
+              date: new Date().toLocaleDateString(),
+              items,
+              subtotal,
+              taxAmount,
+              totalDue,
+              amountPaid,
+              paymentMethod,
+              notes,
+              status
+            }}
+            patient={patientDetails}
+            clinic={clinicSettings}
+          />
+        </div>
+      </div>
     </div>
   );
 }

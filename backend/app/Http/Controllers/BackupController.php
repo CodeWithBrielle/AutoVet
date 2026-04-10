@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Response;
+use App\Traits\HasAuditTrail;
 
 class BackupController extends Controller
 {
@@ -50,6 +51,7 @@ class BackupController extends Controller
             $exitCode = Artisan::call('db:backup');
             
             if ($exitCode === 0) {
+                HasAuditTrail::logManual('created_backup', 'Database', 0, null, ['status' => 'success']);
                 return response()->json(['message' => 'Backup created successfully.']);
             }
             
@@ -80,6 +82,7 @@ class BackupController extends Controller
             $exitCode = Artisan::call('db:restore', ['file' => $filename]);
 
             if ($exitCode === 0) {
+                HasAuditTrail::logManual('restored_database', 'Database', 0, ['filename' => $filename], ['status' => 'success']);
                 return response()->json(['message' => 'Database restored successfully!']);
             }
 
@@ -98,6 +101,7 @@ class BackupController extends Controller
 
         if (File::exists($backupPath)) {
             File::delete($backupPath);
+            HasAuditTrail::logManual('deleted_backup', 'Database', 0, ['filename' => $filename], null);
             return response()->json(['message' => 'Backup deleted successfully.']);
         }
 

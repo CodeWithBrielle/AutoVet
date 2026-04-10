@@ -4,13 +4,14 @@ namespace App\Models;
 
 use App\Traits\Archivable;
 use App\Traits\HasSyncFields;
+use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 
 class Service extends Model
 {
-    use SoftDeletes, HasSyncFields, Archivable;
+    use SoftDeletes, HasSyncFields, Archivable, HasAuditTrail;
     protected $connection = 'mysql';
     protected $fillable = [
         'name',

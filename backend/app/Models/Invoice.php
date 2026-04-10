@@ -3,11 +3,12 @@
 namespace App\Models;
 
 use App\Traits\HasSyncFields;
+use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 
 class Invoice extends Model
 {
-    use HasSyncFields;
+    use HasSyncFields, HasAuditTrail;
 
     protected $guarded = [];
 

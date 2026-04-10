@@ -31,12 +31,16 @@ import ManualSendModal from "../notifications/ManualSendModal";
 const viewModes = ["Month", "Week", "Day"];
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+const todayString = new Date().toISOString().split('T')[0];
+
 const quickAddSchema = z.object({
-  date: z.string().min(1, "Date is required"),
+  date: z.string().min(1, "Date is required").refine(val => val >= todayString, {
+    message: "Appointment date cannot be in the past"
+  }),
   time: z.string().min(1, "Time is required").regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Invalid time format (HH:mm)"),
   pet_id: z.string().min(1, "Please select a pet"),
   service_id: z.string().min(1, "Please select a service"),
-  vet_id: z.string().optional(),
+  vet_id: z.string().min(1, "Please select a veterinarian"),
   notes: z.string().optional(),
 });
 
@@ -486,7 +490,7 @@ function AppointmentsView() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Date</label>
-                    <input type="date" {...register("date")} className={clsx(getQInputClass(errors.date), "font-bold bg-white dark:bg-dark-card")} />
+                    <input type="date" {...register("date")} min={todayString} className={clsx(getQInputClass(errors.date), "font-bold bg-white dark:bg-dark-card")} />
                     {errors.date && <p className="mt-1 text-xs text-red-500 font-bold">{errors.date.message}</p>}
                   </div>
                   <div>
@@ -497,14 +501,15 @@ function AppointmentsView() {
                 </div>
 
                 <div>
-                  <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Assigned Veterinarian</label>
+                  <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Assigned Veterinarian *</label>
                   <div className="relative">
-                    <select {...register("vet_id")} className={clsx(getQInputClass(false), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
+                    <select {...register("vet_id")} className={clsx(getQInputClass(errors.vet_id), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
                       <option value="">— Select Vet —</option>
                       {vets.map(v => <option key={v.id} value={v.id}>Dr. {v.name}</option>)}
                     </select>
                     <FiChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-401" />
                   </div>
+                  {errors.vet_id && <p className="mt-2 text-xs text-red-500 font-black italic">{errors.vet_id.message}</p>}
                 </div>
 
                 <div>
@@ -582,7 +587,7 @@ function AppointmentsView() {
                     <div className="overflow-hidden">
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Patient & Guardian</p>
                       <p className="text-lg font-black text-slate-800 dark:text-zinc-100 truncate">
-                        {selectedAppointment?.pet?.name} <span className="mx-2 text-slate-300 font-normal">|</span> <span className="text-slate-500 dark:text-zinc-400">ID #{selectedAppointment?.pet?.owner_id}</span>
+                        {selectedAppointment?.pet?.name} <span className="mx-2 text-slate-300 font-normal">|</span> <span className="text-slate-500 dark:text-zinc-400">{selectedAppointment?.pet?.owner?.name || "No Owner Info"}</span>
                       </p>
                     </div>
                   </div>

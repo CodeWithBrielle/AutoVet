@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use App\Traits\HasAuditTrail;
 
 class ArchiveController extends Controller
 {
@@ -63,6 +64,7 @@ class ArchiveController extends Controller
         // }
 
         $item->restore();
+        HasAuditTrail::logManual('restored_archived_item', $modelClass, $id, ['status' => 'archived'], ['status' => 'active']);
 
         return response()->json(['message' => 'Item restored successfully.']);
     }
@@ -81,6 +83,7 @@ class ArchiveController extends Controller
 
         try {
             $item->forceDelete();
+            HasAuditTrail::logManual('purged_archived_item', $modelClass, $id, ['status' => 'archived'], null);
             return response()->json(['message' => 'Item permanently deleted.']);
         } catch (\Illuminate\Database\QueryException $e) {
             // Log the actual error for debugging but don't show it to the user

@@ -33,3 +33,6 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+
+#ignore embedded repo
+.agent/skills

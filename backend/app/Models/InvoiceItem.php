@@ -53,4 +53,14 @@ class InvoiceItem extends Model
     {
         return $this->belongsTo(Inventory::class, 'inventory_id');
     }
+
+    public function parent()
+    {
+        return $this->belongsTo(InvoiceItem::class, 'parent_id');
+    }
+
+    public function children()
+    {
+        return $this->hasMany(InvoiceItem::class, 'parent_id');
+    }
 }

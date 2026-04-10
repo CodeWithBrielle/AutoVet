@@ -17,29 +17,52 @@ function AuditLogTab() {
   });
   const [expandedId, setExpandedId] = useState(null);
 
-  const fetchLogs = () => {
-    setLoading(true);
-    const params = new URLSearchParams(filters);
-    fetch(`/api/audit-logs?${params.toString()}`, {
-      headers: {
-        "Authorization": `Bearer ${user?.token}`,
-        "Accept": "application/json"
-      }
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch audit logs");
-        return res.json();
-      })
-      .then((data) => {
-        setLogs(data.data || []);
-      })
-      .catch((err) => toast.error(err.message))
-      .finally(() => setLoading(false));
-  };
-
   useEffect(() => {
-    fetchLogs();
-  }, [filters]);
+    const controller = new AbortController();
+    const signal = controller.signal;
+
+    const fetchLogs = async () => {
+      if (!user?.token) return;
+      
+      setLoading(true);
+      const params = new URLSearchParams(filters);
+      
+      try {
+        const response = await fetch(`/api/audit-logs?${params.toString()}`, {
+          signal,
+          headers: {
+            "Authorization": `Bearer ${user.token}`,
+            "Accept": "application/json"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch audit logs");
+        }
+
+        const data = await response.json();
+        setLogs(data.data || []);
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        console.error(err);
+        toast.error(err.message);
+      } finally {
+        if (!signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    // Debounce the fetch call
+    const timer = setTimeout(() => {
+      fetchLogs();
+    }, 500);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [filters, user?.token]);
 
   const toggleExpand = (id) => {
     setExpandedId(expandedId === id ? null : id);

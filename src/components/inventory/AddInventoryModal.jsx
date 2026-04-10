@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FiX, FiCheckCircle, FiInfo, FiCheck } from "react-icons/fi";
+import { FiX, FiCheckCircle, FiInfo, FiCheck, FiPackage, FiZap, FiBox, FiActivity } from "react-icons/fi";
 import { LuSparkles } from "react-icons/lu";
 import { useToast } from "../../context/ToastContext";
 import { useForm, useWatch } from "react-hook-form";
@@ -7,6 +7,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import { useAuth } from "../../context/AuthContext";
+import { getInventoryStatus, getStatusStyles, INVENTORY_STATUS } from "../../utils/inventoryStatus";
 
 const UNIT_OPTIONS = ["", "piece", "vial", "bottle", "tablet", "pack", "box", "dose", "ml", "sachet", "tube"];
 
@@ -17,9 +18,10 @@ const inventorySchema = z.object({
   unit: z.string().min(1, "Unit is required"),
   min_stock_level: z.coerce.number().min(0, "Alert threshold must be 0 or more"),
   
-  price: z.coerce.number().min(0, "Price must be 0 or more").optional().or(z.literal("")), // Legacy field?
+  price: z.coerce.number().min(0, "Price must be 0 or more").optional().or(z.literal("")), 
   cost_price: z.coerce.number().min(0, "Cost price must be 0 or more").optional().or(z.literal("")),
   selling_price: z.coerce.number().min(0, "Selling price is required").optional().or(z.literal("")),
+  service_price: z.coerce.number().min(0, "Service price is required").optional().or(z.literal("")),
   
   is_sellable: z.boolean().default(true),
   is_service_usable: z.boolean().default(false),
@@ -27,7 +29,6 @@ const inventorySchema = z.object({
   track_expiration: z.boolean().default(false),
   expiration_date: z.string().optional().or(z.literal("")),
   
-  // Kept for backward compatibility but optional/defaulted
   supplier: z.string().optional().default("Other"),
   sku: z.string().max(255).optional(),
   sub_details: z.string().max(255).optional(),
@@ -41,15 +42,6 @@ const inventorySchema = z.object({
     });
   }
   
-  // Custom logic for price requirements based on usage and category
-  // (We'll handle category-specific logic here if we had category names, 
-  // but for now let's use the core usage flags. Category names are resolved in the component)
-  if (!data.selling_price && data.selling_price !== 0 && (data.is_sellable || data.is_service_usable)) {
-      // NOTE: We permit 0 as a valid price. empty string or undefined is invalid for billable items.
-      // However, for consumables/supplies we might want to skip this requirement.
-      // The component state determines if we should enforce this.
-  }
-
   if (!data.is_sellable && !data.is_service_usable) {
       ctx.addIssue({
           path: ["is_sellable"],
@@ -59,11 +51,21 @@ const inventorySchema = z.object({
   }
 });
 
+const SectionHeading = ({ icon: Icon, children }) => (
+  <div className="mb-6 mt-8 first:mt-0">
+    <div className="flex items-center gap-2 mb-2">
+      {Icon && <Icon className="h-4 w-4 text-blue-500" />}
+      <h4 className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-400 dark:text-zinc-500">
+        {children}
+      </h4>
+    </div>
+    <div className="h-0.5 w-full bg-slate-50 dark:bg-zinc-800/40 rounded-full"></div>
+  </div>
+);
+
 export default function AddInventoryModal({ isOpen, onClose, onSave }) {
   const toast = useToast();
   const [categoryOptions, setCategoryOptions] = useState([]);
-  const [costPriceDisplay, setCostPriceDisplay] = useState("");
-  const [sellingPriceDisplay, setSellingPriceDisplay] = useState("");
   const { user } = useAuth();
 
   const {
@@ -81,8 +83,9 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
       stock_level: 0,
       unit: "",
       min_stock_level: 10,
-      cost_price: "",
-      selling_price: "",
+      cost_price: 0,
+      selling_price: 0,
+      service_price: 0,
       is_sellable: true,
       is_service_usable: false,
       deduct_on_finalize: true,
@@ -91,7 +94,7 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
       supplier: "Other",
       sku: "",
       sub_details: "",
-      status: "In Stock"
+      status: INVENTORY_STATUS.IN_STOCK
     },
   });
 
@@ -102,6 +105,7 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
   const watchSellable = watch("is_sellable");
   const watchServiceUsable = watch("is_service_usable");
   const watchAutoDeduct = watch("deduct_on_finalize");
+  const watchExpDate = watch("expiration_date");
 
   useEffect(() => {
     if (isOpen && user?.token) {
@@ -114,15 +118,9 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
         .then((res) => res.json())
         .then((data) => {
           let categories = [];
-          if (Array.isArray(data)) {
-            categories = data;
-          } else if (data && Array.isArray(data.data)) {
-            categories = data.data;
-          }
-          const activeCategories = categories.filter(
-            (c) => c.status === "Active" || c.status === "active"
-          );
-          setCategoryOptions(activeCategories);
+          if (Array.isArray(data)) categories = data;
+          else if (data && Array.isArray(data.data)) categories = data.data;
+          setCategoryOptions(categories.filter(c => c.status === "Active" || c.status === "active"));
         })
         .catch(console.error);
     }
@@ -131,7 +129,7 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
   useEffect(() => {
     if (watchCategory && categoryOptions.length > 0) {
       const cat = categoryOptions.find((c) => c.id == watchCategory);
-      if (cat && cat.name) {
+      if (cat?.name) {
         const name = cat.name.toLowerCase();
         if (name.includes("vaccin")) {
           setValue("unit", "dose");
@@ -139,49 +137,19 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
           setValue("is_sellable", false);
           setValue("is_service_usable", true);
           setValue("deduct_on_finalize", true);
-        } else if (name.includes("medicin")) {
-          setValue("track_expiration", true);
-          setValue("is_service_usable", true);
         } else if (name.includes("consumable")) {
           setValue("is_sellable", false);
           setValue("is_service_usable", true);
           setValue("selling_price", 0);
-          setSellingPriceDisplay("0.00");
-        } else if (name.includes("supplies")) {
-          setValue("track_expiration", false);
-          setValue("is_service_usable", true);
+          setValue("service_price", 0);
         }
       }
     }
   }, [watchCategory, categoryOptions, setValue]);
 
-  useEffect(() => {
-    // Only reset if NOT sellable AND NOT service-usable
-    // But if it's a vaccine/medicine (service usable), we KEEP the price.
-    if (!watchSellable && !watchServiceUsable) {
-      setValue("selling_price", null);
-      setSellingPriceDisplay("");
-    }
-  }, [watchSellable, watchServiceUsable, setValue]);
-
-  let stockStatus = "Out of Stock";
-  let stockStatusColor = "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400";
-  let highThresholdWarning = false;
-
-  if (initialStock == 0) {
-    stockStatus = "Out of Stock";
-    stockStatusColor = "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400";
-  } else if (initialStock > 0 && initialStock <= alertThreshold) {
-    stockStatus = "Low Stock";
-    stockStatusColor = "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400";
-  } else {
-    stockStatus = "In Stock";
-    stockStatusColor = "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400";
-  }
-
-  if (initialStock > 0 && alertThreshold >= initialStock * 0.9) {
-      highThresholdWarning = true;
-  }
+  const stockStatus = getInventoryStatus(initialStock, alertThreshold, watchExpDate);
+  const statusClasses = getStatusStyles(stockStatus);
+  const highThresholdWarning = initialStock > 0 && alertThreshold >= initialStock * 0.9;
 
   useEffect(() => {
       setValue("status", stockStatus);
@@ -203,337 +171,186 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
 
       if (!response.ok) {
         const err = await response.json();
-        if (err.errors) {
-          throw new Error(Object.values(err.errors)[0][0]);
-        }
-        throw new Error(err.message || "Failed to save inventory item.");
+        throw new Error(err.errors ? Object.values(err.errors)[0][0] : (err.message || "Failed to save."));
       }
 
       const savedItem = await response.json();
       onSave(savedItem);
-      toast.success("Inventory item added successfully!");
-
-      reset();
-      setCostPriceDisplay("");
-      setSellingPriceDisplay("");
-      onClose();
+      toast.success("Intel record authorized & added.");
+      reset(); onClose();
     } catch (err) {
-      toast.error(err.message || "An error occurred while saving.");
+      toast.error(err.message || "Archive failure.");
     }
   };
 
-  const inputBase =
-    "w-full rounded-xl border bg-slate-50 px-4 py-2.5 text-sm text-slate-800 transition-colors focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-dark-surface dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:bg-dark-surface/80 dark:focus:border-blue-500";
   const getInputClass = (error) =>
     clsx(
-      inputBase,
-      error
-        ? "border-red-400 focus:border-red-500 focus:ring-red-500 dark:border-red-500/50"
-        : "border-slate-200 focus:border-blue-500 dark:border-dark-border"
+      "w-full rounded-2xl border bg-slate-50/50 px-4 py-3 text-sm font-bold text-slate-800 transition-all focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-zinc-900/40 dark:text-zinc-200 dark:placeholder:text-zinc-600",
+      error ? "border-rose-400 focus:border-rose-500" : "border-slate-100 focus:border-blue-500 dark:border-zinc-800"
     );
 
-  const SectionHeading = ({ children }) => (
-    <div className="mb-4 mt-6 first:mt-0">
-      <h4 className="text-[13px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-        {children}
-      </h4>
-      <div className="mt-1.5 h-px w-full bg-slate-100 dark:bg-dark-border/50"></div>
-    </div>
-  );
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm dark:bg-zinc-950/70">
-      <div className="flex w-full max-w-5xl flex-col max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-dark-card dark:shadow-dark-soft">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4 dark:border-dark-border">
-          <div>
-            <h3 className="text-xl font-bold text-slate-800 dark:text-zinc-50">
-              Add New Inventory Item
-            </h3>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">
-              Define parameters for clinical stock management
-            </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm dark:bg-zinc-950/70 overflow-y-auto">
+      <div className="relative w-full max-w-5xl my-8 overflow-hidden rounded-[3rem] bg-white shadow-2xl dark:bg-dark-card border border-white/20">
+        
+        {/* Modern Header */}
+        <div className="bg-slate-50/50 px-10 py-8 dark:bg-dark-surface/10 border-b border-slate-100 dark:border-zinc-800/10">
+          <div className="flex items-center justify-between">
+            <div>
+               <div className="flex items-center gap-2 mb-1">
+                  <FiPackage className="h-4 w-4 text-blue-600" />
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 dark:text-zinc-500">Inventory Procurement</h3>
+               </div>
+               <h2 className="text-3xl font-black text-slate-900 dark:text-zinc-50">Intel Admission</h2>
+            </div>
+            <button
+               onClick={onClose}
+               className="rounded-2xl p-3 text-slate-400 hover:bg-slate-200 dark:hover:bg-zinc-800 transition-all active:scale-90"
+            >
+              <FiX className="h-6 w-6" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus:outline-none dark:text-zinc-500 dark:hover:bg-dark-surface dark:hover:text-zinc-300"
-          >
-            <FiX className="h-5 w-5" />
-          </button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col overflow-hidden h-full">
-          <div className="grid flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-2">
+        <form onSubmit={handleSubmit(onSubmit)} className="overflow-hidden bg-white dark:bg-dark-card">
+          <div className="grid grid-cols-1 lg:grid-cols-2 max-h-[70vh] overflow-y-auto custom-scrollbar">
             
-            <div className="border-r border-slate-100 p-6 dark:border-dark-border">
-              
-              <SectionHeading>A. Item Information</SectionHeading>
-              <div className="grid grid-cols-1 gap-4">
+            {/* Left Panel: Core Specs */}
+            <div className="p-10 border-r border-slate-100 dark:border-zinc-800/30">
+              <SectionHeading icon={FiInfo}>Item Intel & Specs</SectionHeading>
+              <div className="space-y-6">
                 <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    Item Name *
-                  </label>
-                  <input
-                    type="text"
-                    {...register("item_name")}
-                    className={getInputClass(errors.item_name)}
-                    placeholder="e.g., Meloxicam Oral Suspension"
-                  />
-                  {errors.item_name && <p className="mt-1 text-xs text-red-500">{errors.item_name.message}</p>}
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Canonical Item Name</label>
+                  <input type="text" {...register("item_name")} className={getInputClass(errors.item_name)} placeholder="Vax / Med / Supply Name" />
+                  {errors.item_name && <p className="mt-2 text-[10px] font-black uppercase text-rose-500">{errors.item_name.message}</p>}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                      Category *
-                    </label>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">System Category</label>
                     <select {...register("inventory_category_id")} className={getInputClass(errors.inventory_category_id)}>
-                      <option value="" disabled>Select category</option>
-                      {categoryOptions.map((cat) => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
-                      ))}
+                      <option value="" disabled>Select Sector</option>
+                      {categoryOptions.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
                     </select>
-                    {errors.inventory_category_id && <p className="mt-1 text-xs text-red-500">{errors.inventory_category_id.message}</p>}
                   </div>
-
                   <div>
-                    <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                      Unit *
-                    </label>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Unit (UoM)</label>
                     <select {...register("unit")} className={getInputClass(errors.unit)}>
-                      <option value="" disabled>Select unit</option>
+                      <option value="" disabled>Select UoM</option>
                       {UNIT_OPTIONS.filter(Boolean).map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
-                    {errors.unit && <p className="mt-1 text-xs text-red-500">{errors.unit.message}</p>}
                   </div>
                 </div>
               </div>
 
-              <SectionHeading>B. Inventory & Expiration</SectionHeading>
-              <div className="grid grid-cols-2 gap-4">
+              <SectionHeading icon={FiZap}>Logistics Control</SectionHeading>
+              <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    Quantity *
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    {...register("stock_level")}
-                    className={getInputClass(errors.stock_level)}
-                  />
-                  {errors.stock_level && <p className="mt-1 text-xs text-red-500">{errors.stock_level.message}</p>}
+                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Initial Qty</label>
+                   <input type="number" {...register("stock_level")} className={getInputClass(errors.stock_level)} />
                 </div>
-
                 <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    Alert Threshold *
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    {...register("min_stock_level")}
-                    className={getInputClass(errors.min_stock_level)}
-                  />
-                  {errors.min_stock_level && <p className="mt-1 text-xs text-red-500">{errors.min_stock_level.message}</p>}
+                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Alert Level</label>
+                   <input type="number" {...register("min_stock_level")} className={getInputClass(errors.min_stock_level)} />
                 </div>
-
-                <div className="flex items-center col-span-2 pt-2">
-                   <label className="flex cursor-pointer items-center gap-3">
+                
+                <div className="col-span-2 pt-2">
+                   <label className="flex items-center gap-4 cursor-pointer group">
                       <div className="relative">
                         <input type="checkbox" className="peer sr-only" {...register("track_expiration")} />
-                        <div className="block h-6 w-11 rounded-full bg-slate-200 transition-colors peer-checked:bg-blue-600 dark:bg-dark-surface"></div>
-                        <div className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-5"></div>
+                        <div className="h-7 w-12 rounded-full bg-slate-200 transition-colors peer-checked:bg-blue-600 dark:bg-zinc-800"></div>
+                        <div className="absolute left-1.5 top-1.5 h-4 w-4 rounded-full bg-white transition-all peer-checked:translate-x-5"></div>
                       </div>
-                      <div className="flex flex-col">
-                        <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Track Expiration</span>
-                      </div>
-                    </label>
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-600 dark:text-zinc-400 group-hover:text-blue-500 transition-colors">Track Shelf Life</span>
+                   </label>
                 </div>
 
                 {watchTrackExpiration && (
-                  <div className="col-span-2">
-                    <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                      Expiration Date *
-                    </label>
-                    <input
-                      type="date"
-                      {...register("expiration_date")}
-                      className={getInputClass(errors.expiration_date)}
-                    />
-                    {errors.expiration_date && <p className="mt-1 text-xs text-red-500">{errors.expiration_date.message}</p>}
-                  </div>
+                   <div className="col-span-2 animate-in slide-in-from-top-2 duration-300">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Authorization Expiry</label>
+                      <input type="date" {...register("expiration_date")} className={getInputClass(errors.expiration_date)} />
+                   </div>
                 )}
               </div>
 
-              <div className="mt-6 rounded-lg border border-slate-100 bg-slate-50 p-4 dark:border-dark-border dark:bg-dark-surface/40">
+              <div className="mt-10 rounded-3xl bg-slate-50 p-6 dark:bg-zinc-900/50 border border-slate-100 dark:border-zinc-800/40">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Stock Status Preview</span>
-                    {highThresholdWarning && (
-                        <p className="text-[11px] text-amber-500 mt-0.5 flex items-center gap-1">
-                            <FiInfo className="h-3 w-3" /> Threshold exceeds/matches qty.
-                        </p>
-                    )}
-                  </div>
-                  <div className={clsx("flex items-center rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide", stockStatusColor)}>
-                    {stockStatus}
-                  </div>
+                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Provisional Status</p>
+                   <span className={clsx("rounded-full border px-4 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all", statusClasses)}>
+                      {stockStatus}
+                   </span>
                 </div>
+                {highThresholdWarning && (
+                   <p className="mt-3 text-[10px] font-bold text-amber-600 italic">Caution: Alert threshold is high relative to current stock.</p>
+                )}
               </div>
             </div>
 
-            <div className="p-6 bg-slate-50/50 dark:bg-zinc-900/30">
-              
-              <SectionHeading>C. Financials</SectionHeading>
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    Selling Price (₱) *
-                  </label>
-                  <input
-                    type="text"
-                    value={sellingPriceDisplay}
-                    onChange={(e) => {
-                      let raw = e.target.value.replace(/,/g, "");
-                      if (/^\d*\.?\d*$/.test(raw)) {
-                        setSellingPriceDisplay(raw ? raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : "");
-                        setValue("selling_price", raw === "" ? "" : parseFloat(raw), { shouldValidate: true });
-                      }
-                    }}
-                    disabled={!watchSellable && !watchServiceUsable}
-                    className={clsx(
-                      getInputClass(errors.selling_price),
-                      (!watchSellable && !watchServiceUsable) && "opacity-50 cursor-not-allowed bg-slate-100 dark:bg-dark-surface/50"
-                    )}
-                    placeholder={(watchSellable || watchServiceUsable) ? "0.00" : "N/A"}
-                  />
-                  {errors.selling_price && <p className="mt-1 text-xs text-red-500">{errors.selling_price.message}</p>}
+            {/* Right Panel: Financials & Config */}
+            <div className="p-10 bg-slate-50/30 dark:bg-dark-surface/5">
+              <SectionHeading icon={FiBox}>Revenue Config</SectionHeading>
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Acquisition Cost (₱)</label>
+                    <input type="number" step="0.01" {...register("cost_price")} className={getInputClass(errors.cost_price)} placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Retail Markup (₱)</label>
+                    <input type="number" step="0.01" {...register("selling_price")} className={getInputClass(errors.selling_price)} placeholder="0.00" />
+                  </div>
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700 dark:text-zinc-300">
-                    Cost Price (₱) *
-                  </label>
-                  <input
-                    type="text"
-                    value={costPriceDisplay}
-                    onChange={(e) => {
-                      let raw = e.target.value.replace(/,/g, "");
-                      if (/^\d*\.?\d*$/.test(raw)) {
-                        setCostPriceDisplay(raw ? raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : "");
-                        setValue("cost_price", raw === "" ? "" : parseFloat(raw), { shouldValidate: true });
-                        setValue("price", raw === "" ? "" : parseFloat(raw)); // Compat
-                      }
-                    }}
-                    className={getInputClass(errors.cost_price)}
-                    placeholder="0.00"
-                  />
-                  {errors.cost_price && <p className="mt-1 text-xs text-red-500">{errors.cost_price.message}</p>}
+                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Clinical Service Rate (₱)</label>
+                   <input type="number" step="0.01" {...register("service_price")} className={getInputClass(errors.service_price)} placeholder="0.00" />
+                   <p className="mt-2 text-[10px] font-bold italic text-slate-400">Used if item is part of a billed clinic service.</p>
                 </div>
               </div>
 
-              <SectionHeading>D. Usage Configuration</SectionHeading>
-              <p className="mb-4 text-xs text-slate-500 dark:text-zinc-400">
-                Define the primary purpose of this item in the clinic.
-              </p>
-              
-              <div className="space-y-3">
-                <label className={clsx(
-                  "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
-                  watchSellable ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
-                )}>
-                  <div className="mt-0.5">
-                    <input
-                      type="checkbox"
-                      {...register("is_sellable")}
-                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Sellable to Customers</span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Item appears in retail/product sale search results</span>
-                  </div>
-                </label>
-
-                <label className={clsx(
-                  "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
-                  watchServiceUsable ? "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
-                )}>
-                  <div className="mt-0.5">
-                    <input
-                      type="checkbox"
-                      {...register("is_service_usable")}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Usable in Services/Treatments</span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Item can be linked to service setup and treatments</span>
-                  </div>
-                </label>
-
-                {watchSellable && watchServiceUsable && (
-                  <div className="flex items-center gap-2 px-3 py-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 rounded-lg animate-in fade-in zoom-in duration-300">
-                     <LuSparkles className="h-3 w-3 text-amber-500" />
-                     <span className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400">Dual Purpose Item</span>
-                  </div>
-                )}
+              <SectionHeading icon={FiActivity}>System Routing</SectionHeading>
+              <div className="space-y-4">
+                 <UsageToggle label="Available for Retail" sub="Item appears in point-of-sale systems" register={register("is_sellable")} active={watchSellable} />
+                 <UsageToggle label="Usable in Clinic" sub="Item can be linked to veterinary services" register={register("is_service_usable")} active={watchServiceUsable} />
+                 
+                 <div className="pt-4 border-t border-slate-100 dark:border-zinc-800/40 space-y-4">
+                    <UsageToggle label="Auth-Deduct Flow" sub="Authorize system to auto-deduct on invoice finalizing" register={register("deduct_on_finalize")} active={watchAutoDeduct} variant="blue" />
+                 </div>
               </div>
 
-              <SectionHeading>E. Inventory Logic</SectionHeading>
-              
-              <div className="space-y-3">
-                <label className={clsx(
-                  "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors",
-                  watchAutoDeduct ? "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/20" : "border-slate-200 bg-white dark:border-dark-border dark:bg-dark-surface/50"
-                )}>
-                  <div className="mt-0.5">
-                    <input
-                      type="checkbox"
-                      {...register("deduct_on_finalize")}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-800 dark:text-zinc-200">Auto-Deduct Stock</span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Automatic stock reduction</span>
-                  </div>
-                </label>
-              </div>
-
-              {/* Simple Preview Widget */}
-              <div className="mt-6 rounded-2xl bg-slate-900 p-4 shadow-xl">
-                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-blue-400">Preview</p>
-                 <div className="mt-3 flex items-center justify-between">
-                    <div className="flex flex-col">
-                       <span className="text-lg font-bold text-white leading-tight">₱{sellingPriceDisplay || "0.00"}</span>
-                       <span className="text-xs text-slate-400">Retail Price</span>
+              {/* Profit Preview */}
+              <div className="mt-10 rounded-[2rem] bg-slate-900 p-8 text-white shadow-2xl shadow-slate-900/20">
+                 <p className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400 mb-4">Financial Snapshot</p>
+                 <div className="flex items-center justify-between">
+                    <div>
+                       <p className="text-3xl font-black">₱{(Number(watch("selling_price") || 0)).toLocaleString()}</p>
+                       <p className="text-[10px] font-black uppercase text-slate-400 mt-1">Projected Sale</p>
                     </div>
-                    <div className="h-8 w-px bg-slate-800"></div>
-                    <div className="flex flex-col items-end">
-                       <span className="text-lg font-bold text-white leading-tight">{initialStock} {watch("unit") || "units"}</span>
-                       <span className="text-xs text-slate-400">Initial Total</span>
+                    <div className="h-10 w-px bg-slate-800"></div>
+                    <div className="text-right">
+                       <p className="text-3xl font-black text-emerald-400">
+                          {watch("selling_price") > watch("cost_price") 
+                            ? `+₱${(watch("selling_price") - watch("cost_price")).toFixed(2)}`
+                            : "—"}
+                       </p>
+                       <p className="text-[10px] font-black uppercase text-slate-400 mt-1">Gross Margin</p>
                     </div>
                  </div>
               </div>
             </div>
           </div>
 
-          {/* ================= MODAL FOOTER ================= */}
-          <div className="flex shrink-0 items-center justify-between border-t border-slate-100 bg-slate-50 px-6 py-4 dark:border-dark-border dark:bg-dark-card/90 pb-safe">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-200 focus:outline-none dark:text-zinc-300 dark:hover:bg-dark-surface"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-dark-card"
-            >
-              {isSubmitting ? "Saving..." : <><FiCheckCircle className="h-4 w-4" /> Save Item</>}
-            </button>
+          <div className="flex items-center justify-between bg-slate-50/80 px-10 py-8 backdrop-blur-md dark:bg-dark-surface/50 border-t border-slate-100 dark:border-zinc-800/40">
+            <button type="button" onClick={onClose} className="text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors">Discard Draft</button>
+            <div className="flex items-center gap-4">
+               <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 rounded-[1.25rem] bg-blue-600 px-10 py-4 text-xs font-black uppercase tracking-widest text-white shadow-xl shadow-blue-600/20 hover:bg-blue-700 active:scale-95 transition-all"
+               >
+                 {isSubmitting ? "Authorizing..." : <><FiCheckCircle className="h-4 w-4" /> Authorize Entry</>}
+               </button>
+            </div>
           </div>
         </form>
       </div>
@@ -541,23 +358,22 @@ export default function AddInventoryModal({ isOpen, onClose, onSave }) {
   );
 }
 
-// Small helper component for Profile rows
-function ProfileRow({ label, description, active }) {
-    return (
-        <div className="flex items-center justify-between">
-            <div className="flex flex-col">
-                <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">{label}</span>
-                <span className="text-[10px] text-slate-500 dark:text-zinc-500">{description}</span>
-            </div>
-            {active ? (
-                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
-                    <FiCheck className="h-3 w-3" />
-                </div>
-            ) : (
-                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-dark-surface dark:text-zinc-600">
-                    <FiX className="h-3 w-3" />
-                </div>
-            )}
-        </div>
-    );
+function UsageToggle({ label, sub, register, active, variant = "emerald" }) {
+  const activeStyles = {
+    emerald: "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-900/20",
+    blue: "border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-900/20"
+  };
+  const theme = active ? activeStyles[variant] : "border-slate-100 bg-white dark:border-zinc-800/60 dark:bg-zinc-900/20";
+  
+  return (
+    <label className={clsx("flex cursor-pointer items-start gap-4 rounded-3xl border p-5 transition-all shadow-sm", theme)}>
+       <div className="mt-1">
+          <input type="checkbox" {...register} className={clsx("h-5 w-5 rounded-lg border-2 border-slate-300 focus:ring-0", active && "animate-in zoom-in-50")} />
+       </div>
+       <div className="flex flex-col">
+          <span className="text-sm font-black text-slate-800 dark:text-zinc-100 leading-tight">{label}</span>
+          <span className="text-[10px] font-bold text-slate-400 mt-1">{sub}</span>
+       </div>
+    </label>
+  );
 }
