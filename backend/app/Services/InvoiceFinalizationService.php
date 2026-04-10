@@ -32,6 +32,11 @@ class InvoiceFinalizationService
 
             // Loop through items
             foreach ($invoice->items as $item) {
+                // strict phase 2 rules
+                if (!$item->is_confirmed_used || $item->is_removed_from_template) {
+                    continue;
+                }
+
                 if ($item->inventory_id) {
                     $inventoryItem = Inventory::where('id', $item->inventory_id)->lockForUpdate()->first();
 
@@ -76,6 +81,16 @@ class InvoiceFinalizationService
             
             $invoice->stock_deducted = true;
             $invoice->save();
+
+            \Illuminate\Support\Facades\DB::table('invoice_audit_logs')->insert([
+                'invoice_id' => $invoice->id,
+                'user_id' => auth()->id() ?? null,
+                'action' => 'finalized_invoice',
+                'entity' => 'all',
+                'new_value' => 'Stock Deducted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         });
     }
 }

@@ -4,12 +4,13 @@ namespace App\Models;
 
 use App\Traits\Archivable;
 use App\Traits\HasSyncFields;
+use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class MedicalRecord extends Model
 {
-    use SoftDeletes, HasSyncFields, Archivable;
+    use SoftDeletes, HasSyncFields, Archivable, HasAuditTrail;
 
     protected $fillable = [
         'pet_id', 'vet_id', 'appointment_id', 'chief_complaint', 'findings',

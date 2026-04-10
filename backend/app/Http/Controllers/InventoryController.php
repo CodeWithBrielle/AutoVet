@@ -15,14 +15,20 @@ class InventoryController extends Controller
         $this->skuGenerator = $skuGenerator;
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(Inventory::with('inventoryCategory')->get());
+        $query = Inventory::with('inventoryCategory');
+
+        if ($request->has('inventory_category_id')) {
+            $query->where('inventory_category_id', $request->input('inventory_category_id'));
+        }
+
+        return response()->json($query->get());
     }
 
     public function lowStock(Request $request)
     {
-        $lowStockItems = Inventory::whereRaw('stock_level <= min_stock_level')->get();
+        $lowStockItems = Inventory::lowStock()->get();
         return response()->json($lowStockItems);
     }
 
@@ -58,6 +64,7 @@ class InventoryController extends Controller
                     }
                 }
             ],
+            'service_price' => 'nullable|numeric|min:0',
             'supplier' => 'nullable|string|max:255',
             'expiration_date' => 'nullable|date',
             'is_sellable' => 'required|boolean',
@@ -127,6 +134,7 @@ class InventoryController extends Controller
                     }
                 }
             ],
+            'service_price' => 'nullable|numeric|min:0',
             'supplier' => 'nullable|string|max:255',
             'expiration_date' => 'nullable|date',
             'is_sellable' => 'required|boolean',

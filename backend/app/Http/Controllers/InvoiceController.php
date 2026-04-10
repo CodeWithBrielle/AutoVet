@@ -91,10 +91,17 @@ class InvoiceController extends Controller
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
             'items.*.is_hidden' => 'sometimes|boolean',
-            'items.*.is_billable' => 'sometimes|boolean',
+            'items.*.billing_behavior' => 'required|string|in:included,separately_billable,internal_only',
+            'items.*.source_type' => 'required|string|in:appointment_template,manual,custom',
+            'items.*.is_confirmed_used' => 'sometimes|boolean',
+            'items.*.is_removed_from_template' => 'sometimes|boolean',
+            'items.*.was_price_overridden' => 'sometimes|boolean',
+            'items.*.was_quantity_overridden' => 'sometimes|boolean',
             'items.*.unit_price_snapshot' => 'nullable|numeric',
             'items.*.line_total_snapshot' => 'nullable|numeric',
             'items.*.metadata_snapshot' => 'nullable|array',
+            'items.*.client_id' => 'nullable|string',
+            'items.*.parent_invoice_id' => 'nullable|string',
         ]);
 
         if ($validated['discount_value'] > $validated['subtotal'] && $validated['discount_type'] === 'fixed') {
@@ -158,11 +165,10 @@ class InvoiceController extends Controller
                 }
 
                 $isHidden = $itemData['is_hidden'] ?? false;
-                $isBillable = $itemData['is_billable'] ?? (!$isHidden);
+                $billingBehavior = $itemData['billing_behavior'] ?? 'separately_billable';
                 
-                // Enforce 0 amount for hidden items
-                if ($isHidden) {
-                    $itemData['unit_price'] = 0;
+                // Enforce 0 amount for internal_only and included items
+                if ($billingBehavior !== 'separately_billable' || $isHidden) {
                     $itemAmount = 0;
                 } else {
                     $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
@@ -170,9 +176,14 @@ class InvoiceController extends Controller
 
                 $itemData['unit_price_snapshot'] = $itemData['unit_price'];
                 $itemData['line_total_snapshot'] = $itemAmount;
-                $itemData['is_billable'] = $isBillable;
 
-                $calculatedSubtotal += $isBillable ? $itemAmount : 0;
+                $isConfirmedUsed = $itemData['is_confirmed_used'] ?? true;
+                $isRemoved = $itemData['is_removed_from_template'] ?? false;
+
+                if ($isConfirmedUsed && !$isRemoved) {
+                    $calculatedSubtotal += $itemAmount;
+                }
+                
                 $itemsToCreate[] = $itemData;
             }
 
@@ -202,8 +213,35 @@ class InvoiceController extends Controller
                 'notes_to_client' => $validated['notes_to_client'],
             ]);
 
-            foreach ($itemsToCreate as $item) {
-                $invoice->items()->create($item);
+            $clientIdToDbId = [];
+
+            // 1. Save top-level items (no parent_invoice_id)
+            $topLevelItems = array_filter($itemsToCreate, fn($i) => empty($i['parent_invoice_id']));
+            foreach ($topLevelItems as $itemData) {
+                $client_id = $itemData['client_id'] ?? null;
+                unset($itemData['client_id']); unset($itemData['parent_invoice_id']);
+                $model = $invoice->items()->create($itemData);
+                if ($client_id) {
+                    $clientIdToDbId[$client_id] = $model->id;
+                }
+            }
+
+            // 2. Save child items
+            $childItems = array_filter($itemsToCreate, fn($i) => !empty($i['parent_invoice_id']));
+            foreach ($childItems as $itemData) {
+                $client_id = $itemData['client_id'] ?? null;
+                $parent_client_id = $itemData['parent_invoice_id'];
+                
+                unset($itemData['client_id']); unset($itemData['parent_invoice_id']);
+                
+                if (isset($clientIdToDbId[$parent_client_id])) {
+                    $itemData['parent_id'] = $clientIdToDbId[$parent_client_id];
+                }
+                
+                $model = $invoice->items()->create($itemData);
+                if ($client_id) {
+                    $clientIdToDbId[$client_id] = $model->id;
+                }
             }
 
             $invoice->load('items');
@@ -282,6 +320,14 @@ class InvoiceController extends Controller
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
             'items.*.is_hidden' => 'sometimes|boolean',
+            'items.*.billing_behavior' => 'required_with:items|string|in:included,separately_billable,internal_only',
+            'items.*.source_type' => 'required_with:items|string|in:appointment_template,manual,custom',
+            'items.*.is_confirmed_used' => 'sometimes|boolean',
+            'items.*.is_removed_from_template' => 'sometimes|boolean',
+            'items.*.was_price_overridden' => 'sometimes|boolean',
+            'items.*.was_quantity_overridden' => 'sometimes|boolean',
+            'items.*.client_id' => 'nullable|string',
+            'items.*.parent_invoice_id' => 'nullable|string',
         ]);
 
         if (!empty($validated['appointment_id'])) {
@@ -340,11 +386,10 @@ class InvoiceController extends Controller
                     }
 
                     $isHidden = $itemData['is_hidden'] ?? false;
-                    $isBillable = $itemData['is_billable'] ?? (!$isHidden);
+                    $billingBehavior = $itemData['billing_behavior'] ?? 'separately_billable';
                     
-                    // Enforce 0 amount for hidden items
-                    if ($isHidden) {
-                        $itemData['unit_price'] = 0;
+                    // Enforce 0 amount for internal_only and included items
+                    if ($billingBehavior !== 'separately_billable' || $isHidden) {
                         $itemAmount = 0;
                     } else {
                         $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
@@ -352,9 +397,14 @@ class InvoiceController extends Controller
 
                     $itemData['unit_price_snapshot'] = $itemData['unit_price'];
                     $itemData['line_total_snapshot'] = $itemAmount;
-                    $itemData['is_billable'] = $isBillable;
 
-                    $calculatedSubtotal += $isBillable ? $itemAmount : 0;
+                    $isConfirmedUsed = $itemData['is_confirmed_used'] ?? true;
+                    $isRemoved = $itemData['is_removed_from_template'] ?? false;
+
+                    if ($isConfirmedUsed && !$isRemoved) {
+                        $calculatedSubtotal += $itemAmount;
+                    }
+                    
                     $itemsToUpdate[] = $itemData;
                 }
             } else {
@@ -399,12 +449,37 @@ class InvoiceController extends Controller
                 // Delete items not in the updated list
                 $itemIds = collect($itemsToUpdate)->pluck('id')->filter()->toArray();
                 $invoice->items()->whereNotIn('id', $itemIds)->delete();
+                
+                $clientIdToDbId = [];
 
-                foreach ($itemsToUpdate as $itemData) {
+                // Pass 1: Update existing items & create top-level new items
+                foreach ($itemsToUpdate as &$itemData) {
+                    $client_id = $itemData['client_id'] ?? null;
                     if (isset($itemData['id'])) {
-                        $invoice->items()->where('id', $itemData['id'])->update($itemData);
-                    } else {
-                        $invoice->items()->create($itemData);
+                        $invoice->items()->where('id', $itemData['id'])->update(collect($itemData)->except(['id', 'client_id', 'parent_invoice_id'])->toArray());
+                        if ($client_id) $clientIdToDbId[$client_id] = $itemData['id'];
+                    } else if (empty($itemData['parent_invoice_id'])) {
+                        $dbItem = $invoice->items()->create(collect($itemData)->except(['client_id', 'parent_invoice_id'])->toArray());
+                        $itemData['id'] = $dbItem->id;
+                        if ($client_id) $clientIdToDbId[$client_id] = $dbItem->id;
+                    }
+                }
+                unset($itemData); // break reference
+
+                // Pass 2: Create new child items
+                foreach ($itemsToUpdate as $itemData) {
+                    if (!isset($itemData['id']) && !empty($itemData['parent_invoice_id'])) {
+                        $client_id = $itemData['client_id'] ?? null;
+                        $parent_client_id = $itemData['parent_invoice_id'];
+                        
+                        $createData = collect($itemData)->except(['client_id', 'parent_invoice_id'])->toArray();
+                        
+                        if (isset($clientIdToDbId[$parent_client_id])) {
+                            $createData['parent_id'] = $clientIdToDbId[$parent_client_id];
+                        }
+                        
+                        $dbItem = $invoice->items()->create($createData);
+                        if ($client_id) $clientIdToDbId[$client_id] = $dbItem->id;
                     }
                 }
             }

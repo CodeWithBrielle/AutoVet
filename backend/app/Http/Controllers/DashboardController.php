@@ -150,7 +150,7 @@ class DashboardController extends Controller
         }
 
         // Low inventory check again for hints
-        $lowStock = Inventory::whereColumn('stock_level', '<=', 'min_stock_level')->count();
+        $lowStock = Inventory::lowStock()->count();
         if ($lowStock > 0) {
             $hints[] = "Ensure to refill {$lowStock} low-stock items before the busy periods.";
         }
@@ -179,8 +179,8 @@ class DashboardController extends Controller
         
         $pendingAppointments = Appointment::where('date', '>=', now()->toDateString())->count();
         
-        // Low stock count
-        $lowStockItems = Inventory::whereColumn('stock_level', '<=', 'min_stock_level')->count();
+        // Low stock count (inclusive alert)
+        $lowStockItems = Inventory::lowStock()->count();
 
         // Calculate revenue growth
         $lastMonthRevenue = Invoice::whereIn('status', ['Finalized', 'Paid', 'Partially Paid'])

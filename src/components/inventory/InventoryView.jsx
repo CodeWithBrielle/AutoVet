@@ -1,23 +1,24 @@
 import clsx from "clsx";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useToast } from "../../context/ToastContext";
 import {
   FiAlertTriangle,
   FiBarChart2,
   FiBell,
   FiBox,
-  FiFilter,
   FiPackage,
   FiSearch,
   FiTrendingUp,
   FiX,
   FiPlus,
+  FiGrid,
 } from "react-icons/fi";
 import { LuPill, LuSparkles } from "react-icons/lu";
 import AddInventoryModal from "./AddInventoryModal";
 import ViewInventoryModal from "./ViewInventoryModal";
 import { useAuth } from "../../context/AuthContext";
 import { ROLES } from "../../constants/roles";
+import { getInventoryStatus, getStatusStyles, INVENTORY_STATUS, isExpiringSoon } from "../../utils/inventoryStatus";
 
 const categoryIcons = {
   Medicines: LuPill,
@@ -29,18 +30,12 @@ const categoryIcons = {
 };
 
 const categoryIconStyles = {
-  Medicines: "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400",
-  Vaccines: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
-  Consumables: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400",
-  Retail: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400",
-  Supplies: "bg-slate-100 text-slate-600 dark:bg-slate-900/30 dark:text-slate-400",
-  "Clinic assets": "bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400",
-};
-
-const statusStyles = {
-  "Low Stock": "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  "In Stock": "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-  Expiring: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-400",
+  Medicines: "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400 font-bold",
+  Vaccines: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold",
+  Consumables: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 font-bold",
+  Retail: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 font-bold",
+  Supplies: "bg-slate-100 text-slate-600 dark:bg-slate-900/30 dark:text-slate-400 font-bold",
+  "Clinic assets": "bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400 font-bold",
 };
 
 function TrendMiniChart() {
@@ -59,10 +54,13 @@ function TrendMiniChart() {
 function InventoryView() {
   const toast = useToast();
   const [activeFilter, setActiveFilter] = useState("All Items");
+  const [selectedCategory, setSelectedCategory] = useState("All Categories");
+  const [searchQuery, setSearchQuery] = useState("");
   const [showAiAside, setShowAiAside] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [viewedProduct, setViewedProduct] = useState(null);
   const [inventoryRows, setInventoryRows] = useState([]);
+  const [categoryOptions, setCategoryOptions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSimulating, setIsSimulating] = useState(false);
   const [aiForecastData, setAiForecastData] = useState(null);
@@ -89,7 +87,30 @@ function InventoryView() {
         setIsLoading(false);
       }
     };
+
+    const fetchCategories = async () => {
+      if (!user?.token) return;
+      try {
+        const response = await fetch("/api/inventory-categories?per_page=1000", {
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${user.token}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          let categories = [];
+          if (Array.isArray(data)) categories = data;
+          else if (data && Array.isArray(data.data)) categories = data.data;
+          setCategoryOptions(categories.filter(c => c.status?.toLowerCase() === 'active'));
+        }
+      } catch (error) {
+        console.error("Failed to fetch categories:", error);
+      }
+    };
+
     fetchInventory();
+    fetchCategories();
   }, [user?.token]);
 
   const handleRunForecast = async () => {
@@ -107,7 +128,6 @@ function InventoryView() {
       const data = await response.json();
       setAiForecastData(data);
       
-      // Simulate analysis delay
       setTimeout(() => {
         setIsSimulating(false);
         setShowAiAside(true);
@@ -119,8 +139,6 @@ function InventoryView() {
   };
 
   const handleSaveNewItem = (newItem) => {
-    // Optimistically push the newly saved backend item to the top of the local state 
-    // without triggering a full screen refresh!
     setInventoryRows((prev) => [newItem, ...prev]);
     toast.success(`Successfully added ${newItem.item_name} to the database!`);
   };
@@ -154,34 +172,51 @@ function InventoryView() {
   };
 
   const filteredRows = inventoryRows.filter((row) => {
-    if (activeFilter === "All Items") return true;
-    if (activeFilter === "Low Stock") return Number(row.stock_level) <= Number(row.min_stock_level);
-    if (activeFilter === "Expiring") {
-      if (!row.expiration_date) return false;
-      const expDate = new Date(row.expiration_date);
-      const today = new Date();
-      const diffTime = expDate - today;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays > 0 && diffDays <= 30;
+    const query = searchQuery.toLowerCase().trim();
+    if (query) {
+      const matchName = (row.item_name || "").toLowerCase().includes(query);
+      const matchSku = (row.sku || "").toLowerCase().includes(query);
+      const matchCat = (row.inventory_category?.name || "").toLowerCase().includes(query);
+      if (!matchName && !matchSku && !matchCat) return false;
     }
-    return row.status === activeFilter;
+
+    if (selectedCategory !== "All Categories") {
+      if (row.inventory_category_id != selectedCategory) return false;
+    }
+
+    const status = getInventoryStatus(row.stock_level, row.min_stock_level, row.expiration_date);
+    
+    if (activeFilter === "All Items") return true;
+    if (activeFilter === "Low Stock") return status === INVENTORY_STATUS.LOW || status === INVENTORY_STATUS.CRITICAL || status === INVENTORY_STATUS.OUT_OF_STOCK;
+    if (activeFilter === "Expiring") return status === INVENTORY_STATUS.EXPIRING;
+    if (activeFilter === "Critical Stock") return status === INVENTORY_STATUS.CRITICAL;
+    if (activeFilter === "Out of Stock") return status === INVENTORY_STATUS.OUT_OF_STOCK;
+
+    return true;
   });
 
-  const totalItems = inventoryRows.length;
-  const lowStock = inventoryRows.filter((r) => Number(r.stock_level) <= Number(r.min_stock_level)).length;
-  const expiring = inventoryRows.filter((r) => {
-    if (!r.expiration_date) return false;
-    const expDate = new Date(r.expiration_date);
-    const today = new Date();
-    const diffTime = expDate - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays > 0 && diffDays <= 30; // Flag if expiring within 30 days
-  }).length;
+  const stats = useMemo(() => {
+    const counts = { total: inventoryRows.length, low: 0, expiring: 0, out: 0 };
+    inventoryRows.forEach(row => {
+      const stockLevel = Number(row.stock_level) || 0;
+      const minLevel = Number(row.min_stock_level) || 0;
+      
+      // Low Stock Alert (Dashboard/Inventory Overview logic: anything <= min_stock_level)
+      if (stockLevel <= minLevel) counts.low++;
+      
+      // Out of Stock (level <= 0)
+      if (stockLevel <= 0) counts.out++;
+      
+      // Expiring Soon (Regardless of stock level, to match Reports/Notifications)
+      if (isExpiringSoon(row.expiration_date)) counts.expiring++;
+    });
+    return counts;
+  }, [inventoryRows]);
 
   const dynamicSummaryCards = [
-    { id: "total", label: "TOTAL ITEMS", value: totalItems.toLocaleString(), meta: "Based on DB", metaTone: "text-emerald-600", icon: FiBox },
-    { id: "low", label: "LOW STOCK", value: lowStock.toLocaleString(), meta: "Needs attention", metaTone: "text-amber-600", icon: FiAlertTriangle },
-    { id: "expiring", label: "EXPIRING SOON", value: expiring.toLocaleString(), meta: "Check dates", metaTone: "text-rose-600", icon: FiBell },
+    { id: "total", label: "TOTAL SKUS", value: stats.total.toLocaleString(), meta: "Active Inventory", metaTone: "text-blue-600", icon: FiBox },
+    { id: "low", label: "REORDER ALERT", value: stats.low.toLocaleString(), meta: "Below optimal level", metaTone: "text-orange-600", icon: FiAlertTriangle },
+    { id: "expiring", label: "SHELF LIFE", value: stats.expiring.toLocaleString(), meta: "Expiring < 30 days", metaTone: "text-rose-600", icon: FiBell },
   ];
 
   return (
@@ -206,205 +241,251 @@ function InventoryView() {
         )}
       </div>
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
         {dynamicSummaryCards.map((card) => {
           const Icon = card.icon;
           return (
-            <article key={card.id} className="card-shell p-5">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">{card.label}</p>
-                <Icon className="h-5 w-5 text-slate-400 dark:text-zinc-500" />
+            <article key={card.id} className="relative overflow-hidden rounded-[2rem] bg-white p-6 shadow-soft transition-all hover:shadow-xl dark:bg-dark-card dark:shadow-dark-soft border border-slate-100 dark:border-zinc-800">
+              <div className="flex items-start justify-between">
+                <div className="rounded-2xl bg-slate-50 p-3 dark:bg-dark-surface">
+                  <Icon className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500">{card.label}</p>
+                  <p className="mt-1 text-3xl font-black text-slate-900 dark:text-zinc-50">{card.value}</p>
+                </div>
               </div>
-              <p className="mt-2 text-5xl font-bold leading-none text-slate-900 dark:text-zinc-50">{card.value}</p>
-              <p className={clsx("mt-2 text-sm font-semibold", card.metaTone)}>{card.meta}</p>
+              <div className="mt-6 flex items-center justify-between">
+                 <p className={clsx("text-xs font-bold", card.metaTone)}>{card.meta}</p>
+                 <div className="h-1 w-24 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                    <div className={clsx("h-full rounded-full transition-all duration-1000", card.id === "low" ? "bg-orange-500 w-1/3" : card.id === "expiring" ? "bg-rose-500 w-1/4" : "bg-blue-500 w-3/4")} />
+                 </div>
+              </div>
             </article>
           );
         })}
 
-        <article className="rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 p-5 text-white shadow-soft">
-          <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-blue-100">
-            <LuSparkles className="h-4 w-4" />
-            AI Insight
-          </p>
-          <p className="mt-1 text-2xl font-bold">Stock Optimization</p>
-          <p className="mt-2 text-sm text-blue-100">Forecast refresh complete. 6 items flagged for reorder planning.</p>
+        <article className="relative overflow-hidden rounded-[2rem] bg-slate-900 p-6 text-white shadow-xl shadow-slate-900/20 dark:bg-dark-surface dark:border dark:border-zinc-800">
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="rounded-full bg-blue-500/20 p-2">
+                <LuSparkles className="h-4 w-4 text-blue-300" />
+              </div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-blue-200">System Optimization</p>
+            </div>
+            <p className="text-2xl font-black leading-tight">6 Flagged SKUs</p>
+            <p className="mt-2 text-xs text-slate-400 font-bold leading-relaxed">AI suggests reordering Vaccines and Consumables due to predicted uptick next week.</p>
+          </div>
+          {/* Decorative Background Element */}
+          <div className="absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-blue-600/10 blur-3xl" />
         </article>
       </section>
 
-      <section className="relative card-shell overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-dark-border p-4">
-          <label className="flex h-11 min-w-[260px] flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-slate-500 lg:max-w-md dark:border-dark-border dark:bg-dark-surface dark:text-zinc-400">
-            <FiSearch className="h-4 w-4" />
-            <input
-              type="text"
-              placeholder="Search items, categories, or SKUs..."
-              className="w-full bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none dark:text-zinc-200 dark:placeholder:text-zinc-500"
-            />
-          </label>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 dark:border-dark-border dark:bg-dark-card dark:text-zinc-300 dark:hover:bg-dark-surface">
-              <FiFilter className="h-4 w-4" />
-              Filter
-            </button>
-            <button
-              onClick={() => setActiveFilter("All Items")}
-              className={clsx("rounded-xl border px-4 py-2 text-sm font-semibold", activeFilter === "All Items" ? "border-slate-400 bg-slate-100 text-slate-900 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-50" : "border-slate-200 bg-white text-slate-700 dark:border-dark-border dark:bg-dark-card dark:text-zinc-300")}
-            >
-              All Items
-            </button>
-            <button
-              onClick={() => setActiveFilter("Low Stock")}
-              className={clsx("rounded-xl border px-4 py-2 text-sm font-semibold", activeFilter === "Low Stock" ? "border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "border-slate-200 bg-white text-amber-700 dark:border-dark-border dark:bg-dark-card dark:text-amber-400")}
-            >
-              <span className="mr-2 inline-block h-2 w-2 rounded-full bg-amber-500" />
-              Low Stock
-            </button>
-            <button
-              onClick={() => setActiveFilter("Expiring")}
-              className={clsx("rounded-xl border px-4 py-2 text-sm font-semibold", activeFilter === "Expiring" ? "border-rose-400 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300" : "border-slate-200 bg-white text-rose-700 dark:border-dark-border dark:bg-dark-card dark:text-rose-400")}
-            >
-              <span className="mr-2 inline-block h-2 w-2 rounded-full bg-rose-500" />
-              Expiring
-            </button>
-            {isAdmin && (
-              <button
-                onClick={() => setIsAddModalOpen(true)}
-                className="ml-2 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm"
-              >
-                <FiPlus className="h-4 w-4" />
-                Add Item
-              </button>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          <button
+            onClick={() => setSelectedCategory("All Categories")}
+            className={clsx(
+              "flex items-center gap-2 whitespace-nowrap rounded-full border px-5 py-2 text-sm font-bold transition-all shadow-sm",
+              selectedCategory === "All Categories" 
+                ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200" 
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-dark-border dark:bg-dark-card dark:text-zinc-400"
             )}
-          </div>
+          >
+            <FiGrid className="h-4 w-4" />
+            All Categories
+          </button>
+          {categoryOptions.map((cat) => {
+            const Icon = categoryIcons[cat.name] || FiBox;
+            const active = selectedCategory == cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={clsx(
+                  "flex items-center gap-2 whitespace-nowrap rounded-full border px-5 py-2 text-sm font-bold transition-all shadow-sm",
+                  active 
+                    ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200" 
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-dark-border dark:bg-dark-card dark:text-zinc-400"
+                )}
+              >
+                <Icon className={clsx("h-4 w-4", !active && "text-slate-400")} />
+                {cat.name}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1150px]">
-            <thead className="bg-slate-50 dark:bg-dark-surface">
-              <tr className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-                <th className="px-5 py-4">Item Name / Category</th>
-                <th className="px-5 py-4">Stock Level</th>
-                <th className="px-5 py-4">Pricing (Cost/Sell)</th>
-                <th className="px-5 py-4">Status & Logic</th>
-                <th className="px-5 py-4">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr>
-                  <td colSpan="5" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
-                    Loading inventory data...
-                  </td>
-                </tr>
-              ) : filteredRows.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
-                    No items found matching the current filter.
-                  </td>
-                </tr>
-              ) : (
-                filteredRows.map((row) => {
-                  const catName = row.inventory_category?.name || "Uncategorized";
-                  const Icon = categoryIcons[catName] || FiBox;
-                  const iconStyle = categoryIconStyles[catName] || "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400";
-                  return (
-                    <tr key={row.id} className="border-t border-slate-200 dark:border-dark-border align-top hover:bg-slate-50 dark:hover:bg-dark-surface/50">
-                      <td className="px-5 py-4">
-                        <div className="flex items-start gap-3">
-                          <span className={clsx("mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-lg", iconStyle)}>
-                            <Icon className="h-4 w-4" />
-                          </span>
-                          <div>
-                            <p className="mb-0.5 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">{catName}</p>
-                            <p className="text-lg font-semibold text-slate-900 dark:text-zinc-50">{row.item_name}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-lg font-medium text-slate-800 dark:text-zinc-200">
-                        {Number(row.stock_level || 0).toLocaleString()} {row.unit || "units"}
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex flex-col">
-                          {Number(row.selling_price ?? 0) > 0 && Number(row.price ?? 0) > 0 && (
-                            <p className="text-sm text-slate-500 dark:text-zinc-500 line-through decoration-slate-300 font-medium">
-                              ₱{Number(row.price ?? 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
-                            </p>
-                          )}
-                          <p className="text-lg font-bold text-slate-900 dark:text-zinc-50">
-                            {Number(row.selling_price ?? 0) > 0 ? (
-                              `₱${Number(row.selling_price).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
-                            ) : (
-                              <span className="text-sm font-semibold text-slate-500 dark:text-zinc-400">
-                                Internal Use Only
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 space-y-2">
-                        <div className="flex flex-wrap gap-2">
-                          {(() => {
-                             const isLowStock = Number(row.stock_level) <= Number(row.min_stock_level);
-                             const expDate = row.expiration_date ? new Date(row.expiration_date) : null;
-                             const isExpiring = expDate && (expDate - new Date()) / (1000 * 60 * 60 * 24) <= 30;
-                             
-                             let currentStatus = row.status;
-                             if (isLowStock) currentStatus = "Low Stock";
-                             else if (isExpiring) currentStatus = "Expiring";
-                             else currentStatus = "In Stock";
+        <section className="relative card-shell overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-dark-border p-4">
+            <label className="flex h-11 min-w-[260px] flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-slate-500 lg:max-w-md dark:border-dark-border dark:bg-dark-surface dark:text-zinc-400">
+              <FiSearch className="h-4 w-4" />
+              <input
+                type="text"
+                placeholder="Search items, categories, or SKUs..."
+                className="w-full bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none dark:text-zinc-200 dark:placeholder:text-zinc-500"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </label>
 
-                             return (
-                               <span
-                                 className={clsx(
-                                   "inline-flex rounded-full border px-3 py-1 text-xs font-semibold whitespace-nowrap",
-                                   statusStyles[currentStatus] || "border-slate-200 bg-slate-50 text-slate-700 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-300"
-                                 )}
-                               >
-                                 {currentStatus}
-                               </span>
-                             );
-                          })()}
-                          {row.is_sellable && (
-                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-900/30 dark:bg-emerald-900/20 dark:text-emerald-400 whitespace-nowrap">
-                              Retail
-                            </span>
-                          )}
-                          {row.is_service_usable && (
-                            <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:border-blue-900/30 dark:bg-blue-900/20 dark:text-blue-400 whitespace-nowrap">
-                              Clinic
-                            </span>
-                          )}
-                          {row.is_sellable && row.is_service_usable && (
-                            <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-400 whitespace-nowrap">
-                              Dual
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-slate-400 dark:text-zinc-500">
-                           <span className={clsx("h-1.5 w-1.5 rounded-full", row.deduct_on_finalize ? "bg-blue-400" : "bg-slate-300")} />
-                           {row.deduct_on_finalize ? "Auto-Deduct" : "Manual Stock Out"}
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-center">
-                        <button
-                          onClick={() => setViewedProduct(row)}
-                          className="inline-flex items-center justify-center rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 focus:outline-none w-full"
-                        >
-                          View Details
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveFilter("All Items")}
+                className={clsx("rounded-xl border px-4 py-2 text-sm font-semibold", activeFilter === "All Items" ? "border-slate-400 bg-slate-100 text-slate-900 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-50" : "border-slate-200 bg-white text-slate-700 dark:border-dark-border dark:bg-dark-card dark:text-zinc-300")}
+              >
+                All States
+              </button>
+              <button
+                onClick={() => setActiveFilter("Low Stock")}
+                className={clsx("rounded-xl border px-4 py-2 text-sm font-semibold", activeFilter === "Low Stock" ? "border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "border-slate-200 bg-white text-amber-700 dark:border-dark-border dark:bg-dark-card dark:text-amber-400")}
+              >
+                Low & Reorder
+              </button>
+              <button
+                onClick={() => setActiveFilter("Expiring")}
+                className={clsx("rounded-xl border px-4 py-2 text-sm font-semibold", activeFilter === "Expiring" ? "border-rose-400 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300" : "border-slate-200 bg-white text-rose-700 dark:border-dark-border dark:bg-dark-card dark:text-rose-400")}
+              >
+                Expiring
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="ml-2 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm"
+                >
+                  <FiPlus className="h-4 w-4" />
+                  New SKU
+                </button>
               )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </div>
 
-        <div className="px-5 py-4 text-sm text-slate-500 dark:text-zinc-400">Showing {filteredRows.length} entries</div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1150px]">
+              <thead className="bg-slate-50 dark:bg-dark-surface">
+                <tr className="text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                  <th className="px-5 py-4">Item Name / Category</th>
+                  <th className="px-5 py-4">Stock Level</th>
+                  <th className="px-5 py-4">Pricing (Cost/Sell)</th>
+                  <th className="px-5 py-4">Status & Logic</th>
+                  <th className="px-5 py-4">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <tr>
+                    <td colSpan="5" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
+                      Loading inventory data...
+                    </td>
+                  </tr>
+                ) : filteredRows.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="px-5 py-8 text-center text-sm text-slate-500 dark:text-zinc-400">
+                      No items found matching the current filter.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRows.map((row) => {
+                    const catName = row.inventory_category?.name || "Uncategorized";
+                    const Icon = categoryIcons[catName] || FiBox;
+                    const iconStyle = categoryIconStyles[catName] || "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400";
+                    return (
+                      <tr key={row.id} className="border-t border-slate-200 dark:border-dark-border align-top hover:bg-slate-50 dark:hover:bg-dark-surface/50">
+                        <td className="px-5 py-4">
+                          <div className="flex items-start gap-3">
+                            <span className={clsx("mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-lg", iconStyle)}>
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <div>
+                              <p className="mb-0.5 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">{catName}</p>
+                              <p className="text-lg font-semibold text-slate-900 dark:text-zinc-50">{row.item_name}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-lg font-medium text-slate-800 dark:text-zinc-200">
+                          {Number(row.stock_level || 0).toLocaleString()} {row.unit || "units"}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-1 dark:border-zinc-800">
+                               <span className="text-[10px] font-bold uppercase text-slate-400 dark:text-zinc-500">Retail</span>
+                               <p className="text-sm font-bold text-slate-900 dark:text-zinc-50">
+                                {Number(row.selling_price ?? 0) > 0 ? (
+                                  `₱${Number(row.selling_price).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
+                                ) : (
+                                  <span className="text-[10px] font-semibold text-slate-400 dark:text-zinc-500 italic">
+                                    N/A
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                               <span className="text-[10px] font-bold uppercase text-slate-400 dark:text-zinc-500">Service</span>
+                               <p className="text-sm font-bold text-slate-900 dark:text-zinc-50">
+                                {Number(row.service_price ?? 0) > 0 ? (
+                                  `₱${Number(row.service_price).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
+                                ) : (
+                                  <span className="text-[10px] font-semibold text-slate-400 dark:text-zinc-500 italic text-right leading-none">
+                                    Use Retail
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          {(() => {
+                              const status = getInventoryStatus(row.stock_level, row.min_stock_level, row.expiration_date);
+                              return (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span
+                                    className={clsx(
+                                      "inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase tracking-tight",
+                                      getStatusStyles(status)
+                                    )}
+                                  >
+                                    {status}
+                                  </span>
+                                  {(row.is_sellable || row.is_service_usable) && (
+                                    <span className="inline-flex rounded-lg border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-500 dark:border-zinc-800 dark:bg-zinc-800/10">
+                                      {row.is_sellable && row.is_service_usable ? "Dual" : row.is_sellable ? "Retail Only" : "Clinic Only"}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                          })()}
+                          <div className="mt-2 flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-slate-400 dark:text-zinc-500">
+                               <span className={clsx("h-1.5 w-1.5 rounded-full", row.deduct_on_finalize ? "bg-blue-400" : "bg-slate-300")} />
+                               {row.deduct_on_finalize ? "Auto-Deduct" : "Manual Log"}
+                            </div>
+                            {row.updated_at && (
+                               <p className="text-[9px] font-black uppercase text-slate-300 dark:text-zinc-600">
+                                 Moved: {new Date(row.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                               </p>
+                            )}
+                          </div>
+                        </td>
 
-      </section>
+                        <td className="px-5 py-4 text-center">
+                          <button
+                            onClick={() => setViewedProduct(row)}
+                            className="inline-flex items-center justify-center rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 focus:outline-none w-full"
+                          >
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="px-5 py-4 text-sm text-slate-500 dark:text-zinc-400">Showing {filteredRows.length} entries</div>
+        </section>
+      </div>
 
       <AddInventoryModal
         isOpen={isAddModalOpen}

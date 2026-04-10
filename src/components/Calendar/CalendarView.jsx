@@ -189,9 +189,9 @@ function CalendarView() {
                           <FiClock className="h-3.5 w-3.5 flex-shrink-0" />
                           <span>{event.time}</span>
                         </div>
-                        {event.pet_owner && (
+                        {event.pet?.owner?.name && (
                           <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
-                            <span className="font-medium">Owner:</span> {event.pet_owner}
+                            <span className="font-medium">Owner:</span> {event.pet.owner.name}
                           </p>
                         )}
                         {event.pet_name && (

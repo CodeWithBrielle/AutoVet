@@ -17,7 +17,7 @@ class AppointmentController extends Controller
     }
     public function index(Request $request)
     {
-        $query = Appointment::with(['pet', 'service', 'vet'])->orderBy('date', 'desc');
+        $query = Appointment::with(['pet.owner', 'service', 'vet'])->orderBy('date', 'desc');
         
         if ($request->has('pet_id')) {
             $query->where('pet_id', $request->pet_id);
@@ -30,14 +30,14 @@ class AppointmentController extends Controller
     {
         $validated = $request->validate([
             'title' => 'nullable|string|max:255',
-            'date' => 'required|date',
+            'date' => 'required|date|after_or_equal:today',
             'time' => 'required|date_format:H:i',
             'category' => 'nullable|string|max:100',
             'notes' => 'nullable|string',
             'status' => 'nullable|string|in:pending,completed,cancelled',
             'pet_id' => 'required|exists:pets,id',
             'service_id' => 'required|exists:services,id',
-            'vet_id' => 'nullable|exists:users,id',
+            'vet_id' => 'required|exists:users,id',
         ]);
 
         // Default title to service name if not provided
@@ -123,26 +123,26 @@ class AppointmentController extends Controller
             \Illuminate\Support\Facades\Log::warning("Failed to send automated appointment notification: " . $e->getMessage());
         }
 
-        return response()->json($appointment->load(['pet', 'service', 'vet']), 201);
+        return response()->json($appointment->load(['pet.owner', 'service', 'vet']), 201);
     }
 
     public function show(Appointment $appointment)
     {
-        return response()->json($appointment->load(['pet', 'service', 'vet']));
+        return response()->json($appointment->load(['pet.owner', 'service', 'vet']));
     }
 
     public function update(Request $request, Appointment $appointment)
     {
         $validated = $request->validate([
             'title' => 'nullable|string|max:255',
-            'date' => 'required|date',
+            'date' => 'required|date|after_or_equal:today',
             'time' => 'required|date_format:H:i',
             'category' => 'nullable|string|max:100',
             'notes' => 'nullable|string',
             'status' => 'nullable|string|in:pending,completed,cancelled',
             'pet_id' => 'required|exists:pets,id',
             'service_id' => 'required|exists:services,id',
-            'vet_id' => 'nullable|exists:users,id',
+            'vet_id' => 'required|exists:users,id',
         ]);
 
         if (!empty($validated['vet_id'])) {

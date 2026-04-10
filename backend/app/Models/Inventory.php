@@ -4,13 +4,14 @@ namespace App\Models;
 
 use App\Traits\Archivable;
 use App\Traits\HasSyncFields;
+use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 
 class Inventory extends Model
 {
-    use SoftDeletes, HasSyncFields, Archivable;
+    use SoftDeletes, HasSyncFields, Archivable, HasAuditTrail;
     protected $fillable = [
         'item_name',
         'sub_details',
@@ -20,6 +21,7 @@ class Inventory extends Model
         'status',
         'cost_price',
         'selling_price',
+        'service_price',
         'supplier',
         'expiration_date',
         'min_stock_level',
@@ -35,6 +37,7 @@ class Inventory extends Model
     protected $casts = [
         'cost_price'               => 'decimal:2',
         'selling_price'            => 'decimal:2',
+        'service_price'            => 'decimal:2',
         'is_sellable'              => 'boolean',
         'is_service_usable'        => 'boolean',
         'deduct_on_finalize'       => 'boolean',
@@ -75,5 +78,38 @@ class Inventory extends Model
         if (!$this->hasOnlyInitialStockTransaction()) {
             throw new \Exception("This item cannot be permanently deleted because it already has inventory activity beyond its initial stock entry.");
         }
+    }
+
+    /**
+     * Scope for Out of Stock items.
+     */
+    public function scopeOutOfStock($query)
+    {
+        return $query->where('stock_level', '<=', 0);
+    }
+
+    /**
+     * Scope for Low Stock items (Inclusive of Out of Stock).
+     */
+    public function scopeLowStock($query)
+    {
+        return $query->whereColumn('stock_level', '<=', 'min_stock_level');
+    }
+
+    /**
+     * Scope for Critical Stock items (Inclusive of Out of Stock).
+     */
+    public function scopeCriticalStock($query)
+    {
+        return $query->whereRaw('stock_level <= (min_stock_level * 0.25)');
+    }
+
+    /**
+     * Scope for Expiring Soon items (within next 30 days).
+     */
+    public function scopeExpiringSoon($query)
+    {
+        return $query->whereDate('expiration_date', '>=', now())
+            ->whereDate('expiration_date', '<=', now()->addDays(30));
     }
 }
