@@ -18,21 +18,27 @@ class OwnerController extends Controller
     {
         if (!$phone) return null;
 
+        // Strip non-numeric characters except +
+        $phone = preg_replace('/(?<!^)\+|[^0-9+]/', '', $phone);
+
+        // Handle local PH format 09XXXXXXXXX -> +639XXXXXXXXX
+        if (preg_match('/^09\d{9}$/', $phone)) {
+            $phone = '+63' . substr($phone, 1);
+        }
+
         $phoneUtil = PhoneNumberUtil::getInstance();
         try {
-            // Parse the number. If no leading +, we'll attempt to parse with PH as default for safety
-            // but the frontend should provide + code.
+            // Parse with PH as default
             $numberProto = $phoneUtil->parse($phone, "PH");
             
             if ($phoneUtil->isValidNumber($numberProto)) {
                 return $phoneUtil->format($numberProto, PhoneNumberFormat::E164);
             }
         } catch (NumberParseException $e) {
-            // Fallback to basic cleanup if parsing fails
+            // Log if needed
         }
 
-        // Basic cleanup if library fails or number is invalid
-        return preg_replace('/(?<!^)\+|[^0-9+]/', '', $phone);
+        return $phone; // Return cleaned numeric string as fallback
     }
 
     public function import(Request $request)
@@ -116,9 +122,19 @@ class OwnerController extends Controller
                 'required',
                 'string',
                 function ($attribute, $value, $fail) {
+                    $cleaned = preg_replace('/(?<!^)\+|[^0-9+]/', '', $value);
+                    if (strlen($cleaned) < 10) {
+                        $fail('The phone number is too short (min 10 digits).');
+                        return;
+                    }
+                    
                     $phoneUtil = PhoneNumberUtil::getInstance();
                     try {
-                        $numberProto = $phoneUtil->parse($value, "PH");
+                        $tempValue = $cleaned;
+                        if (preg_match('/^09\d{9}$/', $tempValue)) {
+                            $tempValue = '+63' . substr($tempValue, 1);
+                        }
+                        $numberProto = $phoneUtil->parse($tempValue, "PH");
                         if (!$phoneUtil->isValidNumber($numberProto)) {
                             $fail('The phone number is not a valid international number.');
                         }
@@ -129,9 +145,9 @@ class OwnerController extends Controller
             ],
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string|max:255',
-            'city' => 'nullable|string|max:255',
-            'province' => 'nullable|string|max:255',
-            'zip' => 'nullable|string|max:255',
+            'city' => 'required|string|max:255',
+            'province' => 'required|string|max:255',
+            'zip' => 'required|string|max:255',
         ], [
             'phone.required' => 'Phone number is required.',
         ]);
@@ -163,9 +179,19 @@ class OwnerController extends Controller
                 'required',
                 'string',
                 function ($attribute, $value, $fail) {
+                    $cleaned = preg_replace('/(?<!^)\+|[^0-9+]/', '', $value);
+                    if (strlen($cleaned) < 10) {
+                        $fail('The phone number is too short (min 10 digits).');
+                        return;
+                    }
+
                     $phoneUtil = PhoneNumberUtil::getInstance();
                     try {
-                        $numberProto = $phoneUtil->parse($value, "PH");
+                        $tempValue = $cleaned;
+                        if (preg_match('/^09\d{9}$/', $tempValue)) {
+                            $tempValue = '+63' . substr($tempValue, 1);
+                        }
+                        $numberProto = $phoneUtil->parse($tempValue, "PH");
                         if (!$phoneUtil->isValidNumber($numberProto)) {
                             $fail('The phone number is not a valid international number.');
                         }
@@ -176,9 +202,9 @@ class OwnerController extends Controller
             ],
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string|max:255',
-            'city' => 'nullable|string|max:255',
-            'province' => 'nullable|string|max:255',
-            'zip' => 'nullable|string|max:255',
+            'city' => 'required|string|max:255',
+            'province' => 'required|string|max:255',
+            'zip' => 'required|string|max:255',
         ], [
             'phone.required' => 'Phone number is required.',
         ]);

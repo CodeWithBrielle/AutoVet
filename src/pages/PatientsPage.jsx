@@ -6,6 +6,9 @@ import EditOwnerModal from "../components/patients/EditOwnerModal";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import PhoneInput from "../components/common/PhoneInput";
+import api from "../utils/api";
+import { PHILIPPINE_CITIES } from "../constants/locations";
+import { FiChevronDown } from "react-icons/fi";
 
 function PatientsPage() {
   const toast = useToast();
@@ -18,17 +21,15 @@ function PatientsPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [ownerToEdit, setOwnerToEdit] = useState(null);
   const [phoneValue, setPhoneValue] = useState("");
+  const [selectedCity, setSelectedCity] = useState("");
+  const [province, setProvince] = useState("");
+  const [zip, setZip] = useState("");
 
   const fetchOwners = () => {
     setIsLoading(true);
-    fetch("/api/owners", {
-      headers: { 
-        "Accept": "application/json",
-        "Authorization": `Bearer ${user?.token}`
-      }
-    })
-      .then((res) => res.json())
-      .then((data) => {
+    api.get("/api/owners")
+      .then((res) => {
+        const data = res.data;
         setOwners(Array.isArray(data) ? data : Array.isArray(data.data) ? data.data : []);
         setIsLoading(false);
       })
@@ -53,13 +54,7 @@ function PatientsPage() {
   const handleDeleteOwner = async (ownerId) => {
     if (!window.confirm("Archive: recoverable within 30 days.\nAre you sure you want to archive this owner?")) return;
     try {
-      await fetch(`/api/owners/${ownerId}`, { 
-        method: "DELETE",
-        headers: { 
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        }
-      });
+      await api.delete(`/api/owners/${ownerId}`);
       setOwners((prev) => prev.filter((o) => o.id !== ownerId));
       setSelectedOwnerId(null);
       toast.success("Owner archived successfully.");
@@ -104,27 +99,26 @@ function PatientsPage() {
               e.preventDefault();
               const formData = new FormData(e.target);
               const data = Object.fromEntries(formData);
+              const cleanPhone = phoneValue.replace(/[\s\(\)\-]/g, "");
               try {
-                const res = await fetch("/api/owners", {
-                  method: "POST",
-                  headers: { 
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "Authorization": `Bearer ${user?.token}`
-                  },
-                  body: JSON.stringify({ ...data, phone: phoneValue }),
-                });
-                if (!res.ok) {
-                  const errData = await res.json().catch(() => ({}));
-                  throw new Error(errData.message || "Failed to create owner");
-                }
-                const newOwner = await res.json();
+                const res = await api.post("/api/owners", { ...data, phone: cleanPhone });
+                const newOwner = res.data;
                 setOwners((prev) => [...prev, { ...newOwner, pets: [] }]);
                 setView("records");
                 setSelectedOwnerId(newOwner.id);
+                setPhoneValue(""); // Clear phone input
+                setSelectedCity("");
+                setProvince("");
+                setZip("");
                 toast.success("Owner registered successfully!");
               } catch (err) {
-                toast.error(err.message);
+                const msg = err.response?.data?.message || err.message;
+                const fieldErrors = err.response?.data?.errors;
+                if (fieldErrors && fieldErrors.phone) {
+                  toast.error(fieldErrors.phone[0]);
+                } else {
+                  toast.error(msg);
+                }
               }
            }} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -144,8 +138,47 @@ function PatientsPage() {
                   <input name="email" type="email" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200" placeholder="email@example.com" />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Address</label>
-                  <input name="address" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200" placeholder="123 Street..." />
+                  <label className="block text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Street Address</label>
+                  <input name="address" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200" placeholder="Room/House/Bldg, Street No..." />
+                </div>
+                <div>
+                  <label className="block text-xs font-black uppercase tracking-widest text-slate-400 mb-1">City *</label>
+                  <div className="relative">
+                    <select 
+                      name="city" 
+                      required 
+                      value={selectedCity}
+                      onChange={(e) => {
+                        const city = e.target.value;
+                        setSelectedCity(city);
+                        const cityData = PHILIPPINE_CITIES[city];
+                        if (cityData) {
+                          setProvince(cityData.province);
+                          setZip(cityData.zip);
+                        } else {
+                          setProvince("");
+                          setZip("");
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 appearance-none dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200"
+                    >
+                      <option value="">Select City...</option>
+                      {Object.keys(PHILIPPINE_CITIES).sort().map(city => (
+                        <option key={city} value={city}>{city}</option>
+                      ))}
+                    </select>
+                    <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Province</label>
+                    <input name="province" value={province} readOnly className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 dark:border-dark-border dark:bg-dark-surface/50 dark:text-zinc-400" placeholder="Province" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black uppercase tracking-widest text-slate-400 mb-1">Zip Code</label>
+                    <input name="zip" value={zip} readOnly className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 dark:border-dark-border dark:bg-dark-surface/50 dark:text-zinc-400" placeholder="Zip" />
+                  </div>
                 </div>
                 <div className="col-span-2">
                   <button type="submit" className="w-full rounded-xl bg-blue-600 py-4 text-sm font-black text-white shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-colors">

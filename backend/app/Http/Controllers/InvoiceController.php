@@ -251,11 +251,17 @@ class InvoiceController extends Controller
                 try {
                     $owner = $invoice->pet->owner;
                     if ($owner) {
+                        $clinicName = \App\Models\Setting::where('key', 'clinic_name')->value('value') ?? 'Our Clinic';
                         $this->clientNotificationService->sendFromTemplate(
                             $owner,
                             'invoice_finalized',
                             'email',
-                            ['invoice_number' => $invoice->invoice_number, 'total' => $invoice->total],
+                            [
+                                'invoice_number' => $invoice->invoice_number,
+                                'total' => number_format($invoice->total, 2),
+                                'pet_name' => $invoice->pet->name ?? '',
+                                'clinic_name' => $clinicName,
+                            ],
                             'automated',
                             $invoice
                         );
@@ -491,11 +497,17 @@ class InvoiceController extends Controller
                 try {
                     $owner = $invoice->pet->owner;
                     if ($owner) {
+                        $clinicName = \App\Models\Setting::where('key', 'clinic_name')->value('value') ?? 'Our Clinic';
                         $this->clientNotificationService->sendFromTemplate(
                             $owner,
                             'invoice_finalized',
                             'email',
-                            ['invoice_number' => $invoice->invoice_number, 'total' => $invoice->total],
+                            [
+                                'invoice_number' => $invoice->invoice_number,
+                                'total' => number_format($invoice->total, 2),
+                                'pet_name' => $invoice->pet->name ?? '',
+                                'clinic_name' => $clinicName,
+                            ],
                             'automated',
                             $invoice
                         );

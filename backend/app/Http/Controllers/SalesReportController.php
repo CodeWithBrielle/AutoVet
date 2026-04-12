@@ -18,7 +18,7 @@ class SalesReportController extends Controller
         $days = $request->query('days', 30);
         $startDate = Carbon::now()->subDays($days);
 
-        $revenue = Invoice::where('status', '!=', 'Cancelled')
+        $revenue = Invoice::realized()
             ->where('created_at', '>=', $startDate)
             ->select(
                 DB::raw('DATE(created_at) as date'),
@@ -39,11 +39,16 @@ class SalesReportController extends Controller
         $limit = $request->query('limit', 5);
 
         $topServices = InvoiceItem::whereHas('invoice', function ($query) {
-                $query->where('status', '!=', 'Cancelled');
+                $query->realized();
             })
             ->whereNotNull('service_id')
-            ->select('item_name', DB::raw('COUNT(*) as total_count'), DB::raw('SUM(subtotal) as total_revenue'))
-            ->groupBy('item_name')
+            ->select(
+                'service_id',
+                'name as item_name',
+                DB::raw('COUNT(*) as total_count'),
+                DB::raw('SUM(COALESCE(line_total_snapshot, amount)) as total_revenue')
+            )
+            ->groupBy('service_id', 'name')
             ->orderBy('total_revenue', 'desc')
             ->limit($limit)
             ->get();
@@ -59,7 +64,8 @@ class SalesReportController extends Controller
         $days = $request->query('days', 7);
         $startDate = Carbon::now()->subDays($days);
 
-        $volume = Invoice::where('created_at', '>=', $startDate)
+        $volume = Invoice::realized()
+            ->where('created_at', '>=', $startDate)
             ->select(
                 DB::raw('DATE(created_at) as date'),
                 DB::raw('COUNT(*) as count')

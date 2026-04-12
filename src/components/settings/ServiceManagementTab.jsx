@@ -1,8 +1,9 @@
 import clsx from "clsx";
-import { useState, useEffect } from "react";
-import { FiTrash2, FiPlus, FiEdit2, FiX, FiSave } from "react-icons/fi";
+import { useState, useEffect, useCallback } from "react";
+import { FiTrash2, FiPlus, FiEdit2, FiX, FiSave, FiSearch } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 
 export const LINKED_ITEM_ELIGIBLE_CATEGORIES = [
   "Vaccination",
@@ -17,17 +18,21 @@ export const LINKED_ITEM_ELIGIBLE_CATEGORIES = [
   "Other"
 ];
 
-export default function ServiceManagementTab() {
+export default function ServiceManagementTab({ masterData, onRefetch }) {
   const toast = useToast();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [serviceCategories, setServiceCategories] = useState([]);
-  const [petSizes, setPetSizes] = useState([]);
-  const [weightRanges, setWeightRanges] = useState([]);
-  const [species, setSpecies] = useState([]);
+  
+  // Use data from props or fallbacks
+  const serviceCategories = masterData?.serviceCategories || [];
+  const petSizes = masterData?.petSizes || [];
+  const weightRanges = masterData?.weightRanges || [];
+  const species = masterData?.species || [];
+  const inventories = masterData?.inventory || [];
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingService, setEditingService] = useState(null);
-  const [inventories, setInventories] = useState([]);
+  const [itemSearch, setItemSearch] = useState("");
   const [activeTab, setActiveTab] = useState('general');
   const { user } = useAuth();
 
@@ -47,77 +52,40 @@ export default function ServiceManagementTab() {
     pricing_rules: []
   });
 
-  const fetchServices = () => {
+  const fetchServices = useCallback(async (isMountedRef) => {
     if (!user?.token) {
       setLoading(false);
       return;
     }
-    setLoading(true);
-    fetch("/api/services", {
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Bearer ${user.token}`
-      }
-    })
-      .then(res => res.json())
-      .then(result => {
-        const normalizedData = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setServices(normalizedData);
-        setLoading(false);
-      })
-      .catch(err => { toast.error("Failed to load services"); setLoading(false); });
-  };
+    
+    // Preserve existing services during loading to prevent UX flickering
+    if (services.length === 0) setLoading(true);
+
+    try {
+      const res = await api.get("/api/services");
+      
+      if (!isMountedRef.current) return;
+
+      const result = res.data;
+      const normalizedData = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
+      setServices(normalizedData);
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      console.error("[ServiceManagement] Load failed:", err);
+      // Preserve existing data on failure
+      toast.error("Unable to refresh services. Using cached data.");
+    } finally {
+      if (isMountedRef.current) setLoading(false);
+    }
+  }, [user?.token, toast, services.length]);
 
   useEffect(() => {
-    if (!user?.token) return;
-    fetchServices();
-
-    const headers = {
-      "Accept": "application/json",
-      "Authorization": `Bearer ${user.token}`
+    const isMountedRef = { current: true };
+    fetchServices(isMountedRef);
+    return () => {
+      isMountedRef.current = false;
     };
-
-    fetch("/api/service-categories", { headers })
-      .then(res => res.json())
-      .then(result => {
-        const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setServiceCategories(normalized);
-      })
-      .catch(console.error);
-
-    fetch("/api/pet-size-categories", { headers })
-      .then(res => res.json())
-      .then(result => {
-        const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        const sorted = [...normalized].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-        setPetSizes(sorted);
-      })
-      .catch(console.error);
-
-    fetch("/api/species?per_page=-1", { headers })
-      .then(res => res.json())
-      .then(result => {
-        const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setSpecies(normalized);
-      })
-      .catch(console.error);
-
-    fetch("/api/weight-ranges?per_page=-1", { headers })
-      .then(res => res.json())
-      .then(result => {
-        const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setWeightRanges(normalized);
-      })
-      .catch(console.error);
-
-    fetch("/api/inventory", { headers })
-      .then(res => res.json())
-      .then(result => {
-        const normalized = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setInventories(normalized.sort((a, b) => a.item_name.localeCompare(b.item_name)));
-      })
-      .catch(console.error);
-  }, [user?.token]);
+  }, [fetchServices]);
 
   const handleOpenModal = (service = null) => {
     if (service) {
@@ -199,42 +167,31 @@ export default function ServiceManagementTab() {
     };
 
     try {
-      const res = await fetch(url, {
+      const res = await api({
         method,
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify(payload)
+        url,
+        data: payload
       });
       
-      const result = await res.json();
-      if (!res.ok) {
-        const errorMsg = result.errors
-          ? Object.values(result.errors).flat().join(", ")
-          : (result.message || "Failed to save service");
-        throw new Error(errorMsg);
-      }
       toast.success(isEditing ? "Service updated" : "Service created");
-      fetchServices();
+      // Trigger a re-sync of services and parent master data
+      fetchServices({ current: true });
+      onRefetch?.();
       handleCloseModal();
     } catch (err) {
-      toast.error(err.message);
+      const result = err.response?.data;
+      const errorMsg = result?.errors
+        ? Object.values(result.errors).flat().join(", ")
+        : (result?.message || err.message || "Failed to save service");
+      toast.error(errorMsg);
     }
   };
 
   const handleDelete = async (id) => {
     if (!confirm("Archive: recoverable within 30 days.\nAre you sure you want to archive this service?")) return;
     try {
-      const res = await fetch(`/api/services/${id}`, {
-        method: "DELETE",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        }
-      });
-      if (!res.ok) throw new Error("Failed to archive");
+      const res = await api.delete(`/api/services/${id}`);
+      if (!res.status.toString().startsWith('2')) throw new Error("Failed to archive");
       toast.success("Service archived");
       fetchServices();
     } catch (err) {
@@ -251,7 +208,7 @@ export default function ServiceManagementTab() {
           <h3 className="text-2xl font-bold text-slate-900 dark:text-zinc-50">Service Management</h3>
           <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">Manage invoice services and fixed prices.</p>
         </div>
-        <button onClick={() => handleOpenModal()} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700transition-all">
+        <button onClick={() => handleOpenModal()} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-all">
           <FiPlus className="h-4 w-4" />
           Add New Service
         </button>
@@ -374,7 +331,7 @@ export default function ServiceManagementTab() {
                         : "border-transparent text-slate-500 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-300"
                     )}
                   >
-                    {tab.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                    {tab === 'required_items' ? "Required Items" : tab.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                   </button>
                 ))}
               </div>
@@ -545,68 +502,97 @@ export default function ServiceManagementTab() {
                   <div className="max-w-4xl mx-auto space-y-6">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-500">Service Consumables</h4>
+                        <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-500">Required Items</h4>
                         <p className="text-sm text-slate-500">Add inventory items required for this service.</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData({
-                            ...formData,
-                            linked_items: [...formData.linked_items, { inventory_id: "", quantity: 1, billing_behavior: "separately_billable", is_required: true, auto_deduct: true, notes: "" }]
-                          });
-                        }}
-                        className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 dark:bg-dark-surface dark:text-zinc-300 dark:hover:bg-dark-border"
-                      >
-                        <FiPlus /> Add Item
-                      </button>
+                      <div className="flex items-center gap-3">
+                         <div className="relative">
+                            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                            <input 
+                                type="text"
+                                placeholder="Search items..."
+                                value={itemSearch}
+                                onChange={(e) => setItemSearch(e.target.value)}
+                                className="w-48 rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-xs font-semibold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:bg-dark-surface dark:border-dark-border dark:text-white transition-all shadow-sm"
+                            />
+                         </div>
+                         <button
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                linked_items: [...formData.linked_items, { inventory_id: "", quantity: 1, billing_behavior: "separately_billable", is_required: true, auto_deduct: true, notes: "" }]
+                              });
+                            }}
+                            className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 dark:bg-dark-surface dark:text-zinc-300 dark:hover:bg-dark-border"
+                          >
+                            <FiPlus /> Add Item
+                         </button>
+                      </div>
                     </div>
                     <div className="space-y-4">
                       {formData.linked_items.map((item, idx) => (
-                        <div key={idx} className="flex flex-wrap items-end gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-dark-surface border border-slate-100 dark:border-dark-border">
-                          <div className="flex-1 min-w-[200px]">
-                            <label className="block text-xs font-bold text-slate-700 dark:text-zinc-400 mb-1">Inventory Item *</label>
-                            <select
-                              required
-                              value={item.inventory_id}
-                              onChange={e => {
-                                const nw = [...formData.linked_items];
-                                nw[idx].inventory_id = e.target.value;
-                                setFormData({ ...formData, linked_items: nw });
-                              }}
-                              className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:bg-dark-card dark:border-dark-border dark:text-white"
-                            >
-                              <option value="">Select Active Item</option>
-                              {inventories.filter(inv => inv && String(inv.status).toLowerCase() !== 'inactive' && Boolean(inv.is_service_usable)).map(inv => (
-                                <option key={inv.id} value={inv.id}>{inv.item_name}</option>
-                              ))}
-                            </select>
+                          <div key={idx} className="p-5 rounded-3xl bg-slate-50 dark:bg-dark-surface border border-slate-100 dark:border-dark-border shadow-sm">
+                            <div className="flex flex-wrap items-end gap-4">
+                              <div className="flex-1 min-w-[240px]">
+                                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-400 mb-1.5 uppercase tracking-widest pl-1">Inventory Item *</label>
+                                <select
+                                  required
+                                  value={item.inventory_id}
+                                  onChange={e => {
+                                    const nw = [...formData.linked_items];
+                                    nw[idx].inventory_id = e.target.value;
+                                    setFormData({ ...formData, linked_items: nw });
+                                  }}
+                                  className="w-full rounded-2xl border border-slate-200 p-3 text-sm font-semibold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:bg-dark-card dark:border-dark-border dark:text-white transition-all shadow-sm"
+                                >
+                                  <option value="">Select Primary Item...</option>
+                                  {inventories
+                                    .filter(inv => {
+                                        if (!inv || String(inv.status).toLowerCase() === 'inactive' || !Boolean(inv.is_service_usable)) return false;
+                                        if (!itemSearch) return true;
+                                        // Keep selected items visible even if they don't match search
+                                        if (String(inv.id) === String(item.inventory_id)) return true;
+                                        return inv.item_name.toLowerCase().includes(itemSearch.toLowerCase());
+                                    })
+                                    .map(inv => (
+                                      <option key={inv.id} value={inv.id}>{inv.item_name} {inv.unit_price ? `(₱${inv.unit_price})` : "(No Price)"}</option>
+                                    ))
+                                  }
+                                </select>
+                              </div>
+                              <div className="w-28 text-center bg-white dark:bg-dark-card rounded-2xl border border-slate-200 dark:border-dark-border p-2 self-stretch flex flex-col justify-center shadow-inner">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Unit Price</p>
+                                <p className="text-sm font-black text-blue-600 dark:text-blue-400">
+                                  ₱{Number(inventories.find(i => Number(i.id) === Number(item.inventory_id))?.unit_price || 0).toFixed(2)}
+                                </p>
+                              </div>
+                              <div className="w-24">
+                                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-400 mb-1.5 uppercase tracking-widest pl-1 text-center">Qty *</label>
+                                <input
+                                  required type="number" step="0.01" min="0.01"
+                                  value={item.quantity}
+                                  onChange={e => {
+                                    const nw = [...formData.linked_items];
+                                    nw[idx].quantity = e.target.value;
+                                    setFormData({ ...formData, linked_items: nw });
+                                  }}
+                                  className="w-full rounded-2xl border border-slate-200 p-3 text-sm font-black text-center focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:bg-dark-card dark:border-dark-border dark:text-white transition-all shadow-sm"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nw = [...formData.linked_items];
+                                  nw.splice(idx, 1);
+                                  setFormData({ ...formData, linked_items: nw });
+                                }}
+                                className="flex h-12 w-12 items-center justify-center text-rose-500 hover:bg-rose-50 rounded-2xl transition-all dark:hover:bg-rose-900/20 border border-transparent hover:border-rose-200"
+                              >
+                                <FiTrash2 size={20} />
+                              </button>
+                            </div>
                           </div>
-                          <div className="w-24">
-                            <label className="block text-xs font-bold text-slate-700 dark:text-zinc-400 mb-1">Qty *</label>
-                            <input
-                              required type="number" step="0.01" min="0.01"
-                              value={item.quantity}
-                              onChange={e => {
-                                const nw = [...formData.linked_items];
-                                nw[idx].quantity = e.target.value;
-                                setFormData({ ...formData, linked_items: nw });
-                              }}
-                              className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:bg-dark-card dark:border-dark-border dark:text-white"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const nw = [...formData.linked_items];
-                              nw.splice(idx, 1);
-                              setFormData({ ...formData, linked_items: nw });
-                            }}
-                            className="p-2.5 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors dark:hover:bg-rose-900/20"
-                          >
-                            <FiTrash2 />
-                          </button>
-                        </div>
                       ))}
                     </div>
                   </div>

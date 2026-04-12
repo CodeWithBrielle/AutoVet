@@ -34,7 +34,7 @@ class AppointmentController extends Controller
             'time' => 'required|date_format:H:i',
             'category' => 'nullable|string|max:100',
             'notes' => 'nullable|string',
-            'status' => 'nullable|string|in:pending,completed,cancelled',
+            'status' => 'nullable|string|in:pending,in_progress,completed,cancelled',
             'pet_id' => 'required|exists:pets,id',
             'service_id' => 'required|exists:services,id',
             'vet_id' => 'required|exists:users,id',
@@ -103,9 +103,12 @@ class AppointmentController extends Controller
         $appointment = Appointment::create($validated);
 
         try {
-            $appointment->load('pet.owner');
+            $appointment->load('pet.owner', 'service', 'vet');
             $owner = $appointment->pet->owner;
             if ($owner) {
+                // Load clinic name for template variables
+                $clinicName = \App\Models\Setting::where('key', 'clinic_name')->value('value') ?? 'Our Clinic';
+
                 $this->clientNotificationService->sendFromTemplate(
                     $owner,
                     'appointment_created',
@@ -113,7 +116,13 @@ class AppointmentController extends Controller
                     [
                         'date' => $appointment->date,
                         'time' => $appointment->time,
-                        'title' => $appointment->title
+                        'title' => $appointment->title,
+                        'appointment_date' => \Carbon\Carbon::parse($appointment->date)->format('F j, Y'),
+                        'appointment_time' => \Carbon\Carbon::parse($appointment->time)->format('g:i A'),
+                        'pet_name' => $appointment->pet->name ?? '',
+                        'service_name' => $appointment->service->name ?? '',
+                        'vet_name' => $appointment->vet->name ?? '',
+                        'clinic_name' => $clinicName,
                     ],
                     'automated',
                     $appointment
@@ -135,11 +144,11 @@ class AppointmentController extends Controller
     {
         $validated = $request->validate([
             'title' => 'nullable|string|max:255',
-            'date' => 'required|date|after_or_equal:today',
+            'date' => 'required|date',
             'time' => 'required|date_format:H:i',
             'category' => 'nullable|string|max:100',
             'notes' => 'nullable|string',
-            'status' => 'nullable|string|in:pending,completed,cancelled',
+            'status' => 'nullable|string|in:pending,in_progress,completed,cancelled',
             'pet_id' => 'required|exists:pets,id',
             'service_id' => 'required|exists:services,id',
             'vet_id' => 'required|exists:users,id',

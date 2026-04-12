@@ -3,13 +3,25 @@ import { FiEdit2, FiTrash2, FiPlus, FiSearch, FiX, FiSave, FiChevronLeft, FiChev
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import clsx from "clsx";
+import api from "../../utils/api";
 
-export default function MasterDataTable({ title, description, apiUrl, columns, initialForm, defaultSortBy = "name" }) {
+export default function MasterDataTable({ 
+  title, 
+  description, 
+  apiUrl, 
+  columns, 
+  initialForm, 
+  defaultSortBy = "name",
+  initialData = null,
+  isLoading = false
+}) {
   const { success, error } = useToast();
   const { user } = useAuth();
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [meta, setMeta] = useState({ current_page: 1, last_page: 1, total: 0 });
+  
+  // Use initialData if provided, otherwise empty array
+  const [data, setData] = useState(initialData || []);
+  const [loading, setLoading] = useState(isLoading || (!initialData && !!apiUrl));
+  const [meta, setMeta] = useState({ current_page: 1, last_page: 1, total: initialData?.length || 0 });
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState(defaultSortBy);
   const [sortDir, setSortDir] = useState("asc");
@@ -20,31 +32,43 @@ export default function MasterDataTable({ title, description, apiUrl, columns, i
   const [formData, setFormData] = useState(initialForm);
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchData = useCallback(async () => {
+  // Sync with prop updates from parent (Centralized Master Data pattern)
+  useEffect(() => {
+    if (initialData) {
+      setData(initialData);
+      setMeta(prev => ({ ...prev, total: initialData.length }));
+    }
+  }, [initialData]);
+
+  // Sync loading state with parent
+  useEffect(() => {
+    setLoading(prev => isLoading !== undefined ? isLoading : prev);
+  }, [isLoading]);
+
+  // Use a ref for isMounted to handle cleanup across renders
+  const fetchData = useCallback(async (isMountedRef) => {
     if (!user?.token) {
       setLoading(false); 
       return;
     }
-    setLoading(true);
+    
+    // Only show loading if we don't have data yet to prevent UI flickering/wipe
+    if (data.length === 0) setLoading(true);
+
     try {
-      const query = new URLSearchParams({
-        search,
-        sort_by: sortBy,
-        sort_direction: sortDir,
-        page: page.toString(),
-        per_page: "10"
-      });
-      const res = await fetch(`${apiUrl}?${query.toString()}`, {
-        headers: {
-          "Authorization": `Bearer ${user.token}`,
-          "Accept": "application/json"
+      const res = await api.get(apiUrl, {
+        params: {
+          search,
+          sort_by: sortBy,
+          sort_direction: sortDir,
+          page,
+          per_page: "10"
         }
       });
-      if (!res.ok) {
-        console.error(`[MasterDataTable fetch] Failed URL: ${apiUrl}, Status: ${res.status}`);
-        throw new Error(`Failed to load ${title.toLowerCase()}: ${res.status}`);
-      }
-      const result = await res.json();
+      
+      if (!isMountedRef.current) return;
+
+      const result = res.data;
       
       // Normalize data: handling both { data: [...] } and direct array [...]
       const normalizedData = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
@@ -56,17 +80,34 @@ export default function MasterDataTable({ title, description, apiUrl, columns, i
         total: result.total || normalizedData.length
       });
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error(`[MasterDataTable fetch catch] URL: ${apiUrl}, Error:`, err);
-      error(`Failed to load ${title.toLowerCase()}`);
+      // Keep existing data on error per plan requirements
+      error(`Unable to refresh ${title.toLowerCase()}. Using last available data.`);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
-  }, [apiUrl, search, sortBy, sortDir, page, error, title, user?.token]);
+  }, [apiUrl, search, sortBy, sortDir, page, error, title, user?.token, data.length]);
 
   useEffect(() => {
-    const timer = setTimeout(() => fetchData(), 300);
-    return () => clearTimeout(timer);
-  }, [fetchData]);
+    const isMountedRef = { current: true };
+    
+    // If initialData was provided, only fetch if user triggers an interaction (search, page, etc)
+    // Or if it's the first mount and no initialData exists.
+    const shouldFetch = !initialData || search || page > 1 || sortBy !== defaultSortBy || sortDir !== "asc";
+
+    let timer;
+    if (shouldFetch) {
+      timer = setTimeout(() => fetchData(isMountedRef), 300);
+    } else {
+      setLoading(false);
+    }
+
+    return () => {
+      isMountedRef.current = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [fetchData, initialData, search, page, sortBy, sortDir, defaultSortBy]);
 
   const handleOpenModal = (item = null) => {
     if (item) {
@@ -87,20 +128,11 @@ export default function MasterDataTable({ title, description, apiUrl, columns, i
     const method = isEditing ? "PUT" : "POST";
 
     try {
-      const res = await fetch(url, {
+      await api({
         method,
-        headers: { 
-          "Content-Type": "application/json", 
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify(formData)
+        url,
+        data: formData
       });
-      if (!res.ok) {
-          const errData = await res.json();
-          console.error(`[MasterDataTable save] Failed URL: ${url}, Response:`, errData);
-          throw new Error(errData.message || "Failed to save item");
-      }
       success(`${title.slice(0, -1)} ${isEditing ? "updated" : "added"} successfully`);
       fetchData();
       setIsModalOpen(false);
@@ -115,17 +147,7 @@ export default function MasterDataTable({ title, description, apiUrl, columns, i
   const handleDelete = async (id) => {
     if (!confirm(`Are you sure you want to delete this ${title.toLowerCase().slice(0, -1)}?`)) return;
     try {
-      const res = await fetch(`${apiUrl}/${id}`, { 
-        method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${user?.token}`,
-          "Accept": "application/json"
-        }
-      });
-      if (!res.ok) {
-        console.error(`[MasterDataTable delete] Failed URL: ${apiUrl}/${id}, Status: ${res.status}`);
-        throw new Error("Failed to delete item");
-      }
+      await api.delete(`${apiUrl}/${id}`);
       success(`${title.slice(0, -1)} deleted`);
       fetchData();
     } catch (err) {

@@ -21,6 +21,7 @@ import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import PrintableInvoice from "./PrintableInvoice";
 import ManualSendModal from "../notifications/ManualSendModal";
+import api from "../../utils/api";
 
 const currency = (value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value || 0);
 const pdfCurrency = (value) => "P " + (value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -86,6 +87,7 @@ function InvoiceModuleView() {
   const [isPreviewMode, setIsPreviewMode] = useState(false);
 
   const [currentWeight, setCurrentWeight] = useState("");
+  const [pricingError, setPricingError] = useState(null);
 
   const [services, setServices] = useState([]);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
@@ -105,11 +107,11 @@ function InvoiceModuleView() {
 
     // Fetch owners, pets, and settings on mount
     Promise.all([
-      fetch("/api/owners", { headers }).then(res => res.json()).catch(() => ({ error: "Fetch failed" })),
-      fetch("/api/pets", { headers }).then(res => res.json()).catch(() => ({ error: "Fetch failed" })),
-      fetch("/api/settings", { headers }).then(res => res.json()).catch(() => ({})),
-      fetch("/api/services", { headers }).then(res => res.json()).catch(() => []),
-      fetch("/api/inventory", { headers }).then(res => res.json()).catch(() => [])
+      api.get("/api/owners").then(res => res.data).catch(() => ({ error: "Fetch failed" })),
+      api.get("/api/pets").then(res => res.data).catch(() => ({ error: "Fetch failed" })),
+      api.get("/api/settings").then(res => res.data).catch(() => ({})),
+      api.get("/api/services").then(res => res.data).catch(() => []),
+      api.get("/api/inventory").then(res => res.data).catch(() => [])
     ])
       .then(([ownersData, petsData, settingsData, servicesData, inventoryData]) => {
         // Robustness: Only set array state if data is an array, else log payload
@@ -137,9 +139,9 @@ function InvoiceModuleView() {
         toast.error("Failed to load initial invoice data.");
       });
 
-    fetch("/api/weight-ranges", { headers })
-      .then(res => res.json())
-      .then(data => {
+    api.get("/api/weight-ranges")
+      .then(res => {
+        const data = res.data;
         const ranges = data.data || data;
         if (!Array.isArray(ranges)) {
           console.error("Unexpected weight-ranges response:", data);
@@ -177,13 +179,9 @@ function InvoiceModuleView() {
     setCurrentWeight(patientData?.weight || "");
 
     // Fetch appointments for this patient
-    const headers = {
-      "Accept": "application/json",
-      "Authorization": `Bearer ${user?.token}`
-    };
-    fetch(`/api/appointments?pet_id=${pId}`, { headers })
-      .then(res => res.json())
-      .then(data => {
+    api.get(`/api/appointments?pet_id=${pId}`)
+      .then(res => {
+        const data = res.data;
         const appts = Array.isArray(data) ? data : [];
         // Sort by date descending, take recent 5 + future
         const sorted = appts.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -291,21 +289,38 @@ function InvoiceModuleView() {
   }, [services, inventory, serviceInput]);
 
   const calculateDynamicPrice = (service) => {
-    if (service.pricing_type === "weight_based" && patientDetails?.weight !== null) {
-      const petWeight = Number(patientDetails.weight);
+    if (service.pricing_type === "weight_based") {
+      const effectiveWeight = currentWeight || patientDetails?.weight;
+
+      if (!effectiveWeight) {
+        setPricingError("Weight missing. Pricing cannot be resolved.");
+        return 0;
+      }
+
+      const petWeight = Number(effectiveWeight);
+      const petSpeciesId = patientDetails?.species_id;
+
       const range = weightRanges.find(r => 
         (Number(r.species_id) === Number(petSpeciesId)) &&
         Number(r.min_weight) <= petWeight && 
         (r.max_weight === null || Number(r.max_weight) >= petWeight)
       );
       
-      if (range && range.size_category_id) {
-        // NEW mapping: weight_based rules now use basis_type 'size' and the size_category_id from the range
-        const rule = service.pricing_rules?.find(r => r.basis_type === 'size' && r.reference_id === range.size_category_id);
-        if (rule) return Number(rule.price);
+      if (range) {
+        const rule = service.pricing_rules?.find(r => r.basis_type === 'weight' && r.reference_id === range.id);
+        if (rule) {
+          setPricingError(null);
+          return Number(rule.price);
+        }
+        setPricingError(`No price set for '${range.label}' bracket.`);
+        return 0;
       }
+
+      setPricingError("No matching weight bracket for this species.");
+      return 0;
     }
 
+    setPricingError(null);
     return Number(service.professional_fee || service.price) || 0;
   };
 
@@ -316,15 +331,13 @@ function InvoiceModuleView() {
 
     if (item.type === 'service') {
       try {
-        const headers = {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user.token}`
-        };
-        const res = await fetch(`/api/invoices/resolve-breakdown?service_id=${item.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`, { headers });
-        if (!res.ok) throw new Error("Breakdown failed");
-        const breakdown = await res.json();
+        setPricingError(null);
+        const res = await api.get(`/api/invoices/resolve-breakdown?service_id=${item.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`);
+        const breakdown = res.data;
         setPriceInput(breakdown.professional_fee);
       } catch (e) {
+        const msg = e.response?.data?.message || "Pricing resolution failed.";
+        setPricingError(msg);
         setPriceInput(calculateDynamicPrice(item));
       }
     } else {
@@ -384,7 +397,7 @@ function InvoiceModuleView() {
       metadata_snapshot: breakdown.metadata || {}
     });
 
-    // 2. The Item lines (Linked Consumables)
+    // 2. The Item lines (Required Items)
     if (breakdown.item_lines && breakdown.item_lines.length > 0) {
       breakdown.item_lines.forEach((line, idx) => {
         const inv = inventory.find(i => i.id === line.inventory_id);
@@ -449,18 +462,15 @@ function InvoiceModuleView() {
     if (itemType === 'service' && selectedService) {
       // If we have a selected service, we should use the breakdown to add linked items
       try {
-        const headers = { "Accept": "application/json", "Authorization": `Bearer ${user.token}` };
-        const res = await fetch(`/api/invoices/resolve-breakdown?service_id=${selectedService.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`, { headers });
-        if (res.ok) {
-          const breakdown = await res.json();
-          addServiceLineItems(itemName, breakdown, selectedService);
-          // Reset inputs and return
-          setServiceInput("");
-          setQtyInput(1);
-          setPriceInput(50);
-          setSelectedService(null);
-          return;
-        }
+        const res = await api.get(`/api/invoices/resolve-breakdown?service_id=${selectedService.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`);
+        const breakdown = res.data;
+        addServiceLineItems(itemName, breakdown, selectedService);
+        // Reset inputs and return
+        setServiceInput("");
+        setQtyInput(1);
+        setPriceInput(50);
+        setSelectedService(null);
+        return;
       } catch (e) {
         console.error("Manual add breakdown failed, falling back to flat item", e);
       }
@@ -489,6 +499,7 @@ function InvoiceModuleView() {
     setQtyInput(1);
     setPriceInput(50);
     setSelectedService(null);
+    setPricingError(null);
   };
 
   const removeItem = (id) => {
@@ -601,31 +612,9 @@ function InvoiceModuleView() {
     }
 
     try {
-      const response = await fetch("/api/invoices", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json", 
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify(payload)
-      });
+      const response = await api.post("/api/invoices", payload);
 
       clearErrors();
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        if (response.status === 422) {
-          setLaravelErrors(errorData);
-          toast.error("Validation error. Please check specified fields.");
-        } else {
-          // Extract specific error if backend provided it
-          const detail = errorData.error || errorData.message || "Failed to save invoice";
-          throw new Error(detail);
-        }
-        return;
-      }
-
       toast.success(`Invoice ${finalStatus === "Draft" ? "saved as draft" : "finalized"} successfully.`);
 
       if (finalStatus !== "Draft") {
@@ -635,7 +624,13 @@ function InvoiceModuleView() {
         resetForm();
       }
     } catch (err) {
-      toast.error(err.message || "Failed to save invoice");
+      if (err.response && err.response.status === 422) {
+        setLaravelErrors(err.response.data);
+        toast.error("Validation error. Please check specified fields.");
+      } else {
+        const detail = err.response?.data?.error || err.response?.data?.message || err.message || "Failed to save invoice";
+        toast.error(detail);
+      }
       console.error(err);
     }
   };
@@ -722,21 +717,11 @@ function InvoiceModuleView() {
                           const appt = appointments.find(a => a.id.toString() === newApptId.toString());
                           if (appt && appt.service) {
                             // Auto-load service into invoice
-                            const headers = { "Accept": "application/json", "Authorization": `Bearer ${user?.token}` };
                             const targetUrl = `/api/invoices/resolve-breakdown?service_id=${appt.service_id}&pet_id=${selectedPatientId || ""}&qty=1&weight=${currentWeight || ""}`;
                             console.log("[DEBUG] Fetching breakdown from:", targetUrl);
                             
-                            fetch(targetUrl, { headers })
-                              .then(res => {
-                                if (!res.ok) {
-                                  return res.json().then(data => {
-                                    console.error("[ERROR] API Response Body:", data);
-                                    const detailedMsg = data.errors ? Object.values(data.errors).flat().join(", ") : (data.message || "Failed to resolve pricing");
-                                    throw new Error(detailedMsg);
-                                  });
-                                }
-                                return res.json();
-                              })
+                            api.get(targetUrl)
+                              .then(res => res.data)
                               .then(breakdown => {
                                 console.log("[DEBUG] Breakdown Received:", breakdown);
                                 const timestamp = Date.now();
@@ -798,21 +783,24 @@ function InvoiceModuleView() {
                                 
                                  console.log("[DEBUG] Constructed newItems:", newItems);
                                  
-                                 // Prevent duplicate insertion if already exists
-                                 setItems(prev => {
-                                   const exists = prev.some(i => i.service_id === appt.service_id && !i.is_removed_from_template);
-                                   if (exists) {
-                                     console.warn("[DEBUG] Service already exists in items, skipping.");
-                                     toast.error("Service from appointment is already in the invoice.");
-                                     return prev;
-                                   }
-                                   
-                                   processedApptsRef.current.add(newApptId);
-                                   toast.success(`${appt.service.name} auto-loaded from appointment.`);
-                                   const updated = [...prev, ...newItems];
-                                   console.log("[DEBUG] Successfully added items. New count:", updated.length);
-                                   return updated;
-                                 });
+                                  // Prevent duplicate insertion if already exists
+                                  // We perform this check outside of setItems to safely trigger toast notifications
+                                  const alreadyExists = items.some(i => i.service_id === appt.service_id && !i.is_removed_from_template);
+                                  
+                                  if (alreadyExists) {
+                                    console.warn("[DEBUG] Service already exists in items, skipping.");
+                                    toast.error("Service from appointment is already in the invoice.");
+                                    return;
+                                  }
+                                  
+                                  processedApptsRef.current.add(newApptId);
+                                  toast.success(`${appt.service.name} auto-loaded from appointment.`);
+                                  
+                                  setItems(prev => {
+                                    const updated = [...prev, ...newItems];
+                                    console.log("[DEBUG] Successfully added items. New count:", updated.length);
+                                    return updated;
+                                  });
                               })
                               .catch(err => {
                                 console.error("[ERROR] Failed to resolve breakdown for auto-load:", err);
@@ -991,13 +979,19 @@ function InvoiceModuleView() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => { manuallyAddItem(); setIsDropdownOpen(false); }}
+                    onClick={() => { manuallyAddItem(); setPricingError(null); setIsDropdownOpen(false); }}
                     disabled={!serviceInput || status === "Finalized"}
-                    className="h-11 w-full rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-slate-900 dark:hover:bg-zinc-200"
+                    className="h-11 w-11 flex items-center justify-center rounded-xl bg-slate-900 dark:bg-zinc-100 text-white dark:text-slate-900 shadow-sm hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
-                    Add
+                    <FiPlusCircle className="h-5 w-5" />
                   </button>
                 </div>
+
+                {pricingError && (
+                  <p className="mt-2 text-[11px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-900/20 p-2 rounded-lg flex items-center gap-2 border border-rose-100 dark:border-rose-900/30">
+                    <FiBell className="h-3 w-3" /> {pricingError}
+                  </p>
+                )}
 
                 <div className="mt-3 space-y-2">
                   {items.length > 0 ? items.filter(i => !i.parent_id).map((item) => (

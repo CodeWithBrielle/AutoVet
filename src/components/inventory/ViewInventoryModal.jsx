@@ -9,7 +9,7 @@ import clsx from "clsx";
 import { useState, useEffect } from "react";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
-import { ROLES } from "../../constants/roles";
+import { ROLES, FULL_ACCESS_ROLES } from "../../constants/roles";
 import { getInventoryStatus, getStatusStyles, INVENTORY_STATUS } from "../../utils/inventoryStatus";
 
 // Helper Components for Cleaner Main Logic
@@ -36,7 +36,7 @@ const DetailItem = ({ label, children }) => (
 const TABS = {
   GENERAL: "General",
   FINANCIAL: "Pricing & Usage",
-  STOCK: "Stock & Intelligence",
+  STOCK: "Stock & Levels",
   HISTORY: "Activity Log",
 };
 
@@ -53,7 +53,7 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
   const [isLoadingForecast, setIsLoadingForecast] = useState(false);
 
   const { user } = useAuth();
-  const isAdmin = user?.role === ROLES.ADMIN;
+  const isPowerUser = FULL_ACCESS_ROLES.includes(user?.role);
 
   useEffect(() => {
     if (isOpen && product) {
@@ -181,7 +181,7 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                  <span className={clsx("h-2.5 w-2.5 rounded-full animate-pulse", status === INVENTORY_STATUS.IN_STOCK ? "bg-emerald-500" : "bg-rose-500")} />
-                 <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-zinc-500">Inventory Intel System</h3>
+                 <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-zinc-500">Inventory Data System</h3>
               </div>
               <h2 className="text-3xl font-black text-slate-900 dark:text-zinc-50 leading-tight">
                 {isEditing ? (
@@ -402,7 +402,7 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
         {/* Global Action Bar */}
         <div className="flex items-center justify-between border-t border-slate-100 dark:border-zinc-800 bg-slate-50/50 px-10 py-6 dark:bg-dark-surface/50">
            <div className="flex gap-4">
-              {isAdmin && !isEditing && (
+              {isPowerUser && !isEditing && (
                 <button 
                   onClick={() => onDeleteRequest(product)}
                   className="rounded-2xl p-3 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-colors"
@@ -413,7 +413,7 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
               )}
            </div>
            <div className="flex items-center gap-4">
-              {isAdmin && (
+              {isPowerUser && (
                 <button
                   onClick={() => {
                     if (isEditing) handleSave();

@@ -31,4 +31,12 @@ class Invoice extends Model
     {
         return $this->belongsTo(Appointment::class);
     }
+
+    /**
+     * Scope a query to only include invoices that contribute to realized revenue.
+     */
+    public function scopeRealized($query)
+    {
+        return $query->whereIn('status', ['Finalized', 'Paid', 'Partially Paid']);
+    }
 }

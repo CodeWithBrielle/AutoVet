@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { FiDatabase, FiDownload, FiRefreshCw, FiTrash2, FiAlertTriangle, FiCheckCircle, FiFileText } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 import clsx from "clsx";
 
 function BackupRestoreTab() {
@@ -12,27 +13,14 @@ function BackupRestoreTab() {
   const [processing, setProcessing] = useState(false);
   const [showConfirmRestore, setShowConfirmRestore] = useState(null);
 
-  const authHeader = {
-    "Authorization": `Bearer ${user?.token}`,
-    "Accept": "application/json"
-  };
-
   const fetchBackups = () => {
     setLoading(true);
-    fetch("/api/backups", { headers: authHeader })
+    api.get("/api/backups")
       .then((res) => {
-        if (!res.ok) {
-           throw new Error("Failed to connect to backup server.");
-        }
-        return res.json();
-      })
-      .then((payload) => {
-        // Handle { data: [...] } format from Laravel
-        const data = payload.data || [];
+        const data = res.data?.data || [];
         setBackups(data);
       })
       .catch((err) => {
-        // Only show toast if it's a real failure, not an empty state
         console.error("Backup Fetch Error:", err);
         toast.error("Could not load backups. Please check your connection.");
       })
@@ -45,20 +33,12 @@ function BackupRestoreTab() {
 
   const createBackup = () => {
     setProcessing(true);
-    fetch("/api/backups", { 
-      method: "POST",
-      headers: authHeader
-    })
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Failed to create backup");
-        return data;
-      })
-      .then((data) => {
-        toast.success(data.message);
+    api.post("/api/backups")
+      .then((res) => {
+        toast.success(res.data.message);
         fetchBackups();
       })
-      .catch((err) => toast.error(err.message))
+      .catch((err) => toast.error(err.response?.data?.message || "Failed to create backup"))
       .finally(() => setProcessing(false));
   };
 
@@ -66,47 +46,34 @@ function BackupRestoreTab() {
     if (!confirm(`Are you sure you want to delete backup: ${filename}?`)) return;
     
     setProcessing(true);
-    fetch(`/api/backups/${filename}`, { 
-      method: "DELETE",
-      headers: authHeader
-    })
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Failed to delete backup");
-        return data;
-      })
-      .then((data) => {
-        toast.success(data.message);
+    api.delete(`/api/backups/${filename}`)
+      .then((res) => {
+        toast.success(res.data.message);
         fetchBackups();
       })
-      .catch((err) => toast.error(err.message))
+      .catch((err) => toast.error(err.response?.data?.message || "Failed to delete backup"))
       .finally(() => setProcessing(false));
   };
 
   const restoreBackup = (filename) => {
     setProcessing(true);
     setShowConfirmRestore(null);
-    fetch("/api/backups/restore", {
-      method: "POST",
-      headers: { ...authHeader, "Content-Type": "application/json" },
-      body: JSON.stringify({ filename }),
-    })
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Failed to restore database");
-        return data;
+    api.post("/api/backups/restore", { filename })
+      .then((res) => {
+        toast.success(res.data.message);
       })
-      .then((data) => {
-        toast.success(data.message);
-      })
-      .catch((err) => toast.error(err.message))
+      .catch((err) => toast.error(err.response?.data?.message || "Failed to restore database"))
       .finally(() => setProcessing(false));
   };
 
   const downloadBackup = (filename) => {
     setProcessing(true);
+    // Use raw fetch for blob download since api utility returns JSON
     fetch(`/api/backups/download/${filename}`, {
-      headers: authHeader
+      headers: {
+        "Authorization": `Bearer ${user?.token}`,
+        "Accept": "application/json"
+      }
     })
       .then(async (res) => {
         if (!res.ok) {

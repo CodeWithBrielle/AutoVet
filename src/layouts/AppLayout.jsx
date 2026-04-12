@@ -9,6 +9,7 @@ import {
 } from "../config/navigation";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../constants/roles";
+import api from "../utils/api";
 
 function AppLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -20,16 +21,15 @@ function AppLayout() {
 
   // Redundant redirect logic removed as it is now handled by ProtectedRoute in router.jsx
 
+  // Fetch clinic settings once on mount or when token changes
   React.useEffect(() => {
-    if (user && user.token) {
-      fetch("/api/settings", {
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user.token}`
-        }
-      })
-        .then((res) => res.json())
-        .then((data) => {
+    let isMounted = true;
+    
+    if (user?.token) {
+      api.get("/api/settings")
+        .then((res) => {
+          if (!isMounted) return;
+          const data = res.data;
           if (data.clinic_name) {
             setClinic((prev) => ({ ...prev, name: data.clinic_name }));
           }
@@ -37,9 +37,17 @@ function AppLayout() {
             setClinic((prev) => ({ ...prev, logo: data.clinic_logo }));
           }
         })
-        .catch(console.error);
+        .catch(err => {
+          if (isMounted) {
+            console.error("AppLayout: Settings fetch error:", err);
+          }
+        });
     }
-  }, [user]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.token]);
 
   const pageTitle = useMemo(() => {
     const titledMatch = [...matches].reverse().find((match) => match.handle?.title);

@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { FiCircle } from "react-icons/fi";
 import { formatCurrency, formatCurrencyShort } from "../../utils/formatters";
 import clsx from "clsx";
+import api from "../../utils/api";
+import { useAuth } from "../../context/AuthContext";
 
 const WIDTH = 760;
 const HEIGHT = 320;
@@ -20,19 +22,32 @@ function InventoryChartCard() {
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const { user } = useAuth();
+
   useEffect(() => {
-    setIsLoading(true);
-    fetch(`/api/dashboard/inventory-consumption?range=${activeRange}`)
-      .then(res => res.json())
-      .then(fetchedData => {
-        setData(fetchedData);
+    let isMounted = true;
+    if (!user?.token) return;
+    
+    // Show loading only on initial fetch or when range explicitly changes
+    if (data.length === 0) setIsLoading(true);
+    
+    api.get(`/api/dashboard/inventory-consumption?range=${activeRange}`)
+      .then(res => {
+        if (!isMounted) return;
+        setData(res.data);
         setIsLoading(false);
       })
       .catch(err => {
+        if (!isMounted) return;
         console.error("Failed to fetch inventory data:", err);
+        // Keep existing data on failure, just stop loading
         setIsLoading(false);
       });
-  }, [activeRange]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeRange, user?.token]);
 
   if (isLoading) {
     return (
@@ -87,7 +102,7 @@ function InventoryChartCard() {
     const ratio = i / (numGridLines - 1);
     const value = Math.round(min + (max - min) * ratio);
     const y = toY(value);
-    return { y, label: formatCurrencyShort(value) };
+    return { y, label: value.toLocaleString() };
   });
 
   return (
@@ -166,7 +181,7 @@ function InventoryChartCard() {
             <g transform={`translate(${latestActualPoint.x - 44}, ${latestActualPoint.y - 60})`}>
               <rect width="88" height="40" rx="12" className="fill-slate-900 dark:fill-zinc-800 shadow-xl" />
               <text x="44" y="27" textAnchor="middle" className="fill-white text-[12px] font-black tracking-tight">
-                {formatCurrencyShort(latestActualValue)}
+                {latestActualValue.toLocaleString()}
               </text>
               <text x="44" y="14" textAnchor="middle" className="fill-slate-400 text-[8px] font-black uppercase tracking-widest">
                 LATEST

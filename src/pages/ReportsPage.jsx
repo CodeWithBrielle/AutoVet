@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import MetricCard from "../components/dashboard/MetricCard";
 import { formatCurrency, formatCurrencyShort } from "../utils/formatters";
+import api from "../utils/api";
 
 /**
  * Simple SVG-based Line Chart component.
@@ -77,12 +78,12 @@ function SimpleLineChart({ data, width = 600, height = 240, color = "#10b981", d
         })}
 
         {/* Simplified X Labels (Show first, mid, last) */}
-        {[0, Math.floor(data.length / 2), data.length - 1].map(index => {
+        {[0, Math.floor(data.length / 2), data.length - 1].map((index, i) => {
            if (index < 0 || index >= data.length) return null;
            const d = data[index];
            const x = paddingX + (index * (width - 2 * paddingX) / (data.length > 1 ? data.length - 1 : 1));
            return (
-             <text key={index} x={x} y={height - 10} textAnchor="middle" fontSize="10" className="fill-slate-500 dark:fill-zinc-400 font-bold">
+             <text key={`${index}-${i}`} x={x} y={height - 10} textAnchor="middle" fontSize="10" className="fill-slate-500 dark:fill-zinc-400 font-bold">
                {d.date || d.label || d.name || ""}
              </text>
            );
@@ -166,45 +167,58 @@ function ReportsPage() {
   const [patientData, setPatientData] = useState({ species: [], trends: [], demographics: {} });
   const [inventoryData, setInventoryData] = useState({ summary: null, topMoving: [], movements: [], expiringSoon: [], forecast: null });
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const { user } = useAuth();
 
   useEffect(() => {
     if (!user?.token) return;
     let isMounted = true;
     setIsLoading(true);
+    setError(null);
 
     const fetchData = async () => {
-      const headers = {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${user.token}`
-      };
       try {
         if (activeTab === "Sales") {
-          const [revenue, topServices, volume] = await Promise.all([
-            fetch("/api/reports/sales/revenue-summary", { headers }).then(r => r.json()),
-            fetch("/api/reports/sales/top-services", { headers }).then(r => r.json()),
-            fetch("/api/reports/sales/transaction-volume", { headers }).then(r => r.json())
+          const [revenueRes, topServicesRes, volumeRes] = await Promise.all([
+            api.get("/api/reports/sales/revenue-summary"),
+            api.get("/api/reports/sales/top-services"),
+            api.get("/api/reports/sales/transaction-volume")
           ]);
-          if (isMounted) setSalesData({ revenue, topServices, volume });
+          if (isMounted) setSalesData({ 
+            revenue: revenueRes.data, 
+            topServices: topServicesRes.data, 
+            volume: volumeRes.data 
+          });
         } else if (activeTab === "Patients") {
-          const [species, trends, demographics] = await Promise.all([
-            fetch("/api/reports/patients/species-distribution", { headers }).then(r => r.json()),
-            fetch("/api/reports/patients/registration-trends", { headers }).then(r => r.json()),
-            fetch("/api/reports/patients/demographics", { headers }).then(r => r.json())
+          const [speciesRes, trendsRes, demographicsRes] = await Promise.all([
+            api.get("/api/reports/patients/species-distribution"),
+            api.get("/api/reports/patients/registration-trends"),
+            api.get("/api/reports/patients/demographics")
           ]);
-          if (isMounted) setPatientData({ species, trends, demographics });
+          if (isMounted) setPatientData({ 
+            species: speciesRes.data, 
+            trends: trendsRes.data, 
+            demographics: demographicsRes.data 
+          });
         } else if (activeTab === "Inventory") {
-          const [summary, topMoving, movements, expiringSoon, forecast] = await Promise.all([
-            fetch("/api/reports/inventory/summary", { headers }).then(r => r.json()),
-            fetch("/api/reports/inventory/top-moving", { headers }).then(r => r.json()),
-            fetch("/api/reports/inventory/recent-movements", { headers }).then(r => r.json()),
-            fetch("/api/reports/inventory/expiring-soon", { headers }).then(r => r.json()),
-            fetch("/api/dashboard/inventory-forecast", { headers }).then(r => r.json())
+          const [summaryRes, topMovingRes, movementsRes, expiringSoonRes, forecastRes] = await Promise.all([
+            api.get("/api/reports/inventory/summary"),
+            api.get("/api/reports/inventory/top-moving"),
+            api.get("/api/reports/inventory/recent-movements"),
+            api.get("/api/reports/inventory/expiring-soon"),
+            api.get("/api/dashboard/inventory-forecast")
           ]);
-          if (isMounted) setInventoryData({ summary, topMoving, movements, expiringSoon, forecast });
+          if (isMounted) setInventoryData({ 
+            summary: summaryRes.data, 
+            topMoving: topMovingRes.data, 
+            movements: movementsRes.data, 
+            expiringSoon: expiringSoonRes.data, 
+            forecast: forecastRes.data 
+          });
         }
-      } catch (error) {
-        console.error("Reports data fetch failed:", error);
+      } catch (err) {
+        console.error("Reports data fetch failed:", err);
+        if (isMounted) setError("Failed to load report data. Please check your connection and try again.");
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -281,18 +295,30 @@ function ReportsPage() {
             <span>Loading Report Data...</span>
           </div>
         </div>
+      ) : error ? (
+        <div className="h-64 flex flex-col items-center justify-center text-center space-y-4 rounded-3xl border-2 border-dashed border-rose-100 bg-rose-50/50 p-12 dark:border-rose-900/20 dark:bg-rose-900/10">
+          <FiIcons.FiAlertCircle className="w-12 h-12 text-rose-500" />
+          <h3 className="text-xl font-black text-slate-900 dark:text-zinc-50 uppercase tracking-widest">Report Error</h3>
+          <p className="max-w-xs text-sm text-slate-500 font-medium">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-4 px-6 py-2.5 rounded-xl bg-slate-900 text-white font-bold text-sm hover:scale-105 transition-transform dark:bg-zinc-100 dark:text-zinc-950"
+          >
+            Retry Fetch
+          </button>
+        </div>
       ) : (
         <div className="w-full">
           {activeTab === "Sales" && (
             <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 w-full">
             <MetricCard card={{
-              title: "Est. Total Revenue",
+              title: "Revenue (Last 30 Days)",
               value: formatCurrency(salesMetrics.totalRevenue),
               icon: FiIcons.FiDollarSign,
               iconBg: "bg-emerald-50 dark:bg-emerald-900/20",
               iconColor: "text-emerald-600 dark:text-emerald-400",
-              detail: "Cumulative daily revenue"
+              detail: "Current 30-day realized income"
             }} />
             <MetricCard card={{
               title: "Avg Ticket Value",
@@ -308,7 +334,7 @@ function ReportsPage() {
               icon: FiIcons.FiActivity,
               iconBg: "bg-amber-50 dark:bg-amber-900/20",
               iconColor: "text-amber-600 dark:text-amber-400",
-              detail: "Total invoices processed"
+              detail: "Finalized invoice events"
             }} />
           </div>
 
@@ -317,7 +343,7 @@ function ReportsPage() {
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h3 className="text-xl font-black text-slate-800 dark:text-zinc-50 tracking-tight">Revenue Stream</h3>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Cashflow Trajectory • Last 30 Days</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Realized Cashflow • Last 30 Days</p>
                 </div>
                 <div className="rounded-full bg-emerald-100 p-2 dark:bg-emerald-900/30">
                   <FiIcons.FiTrendingUp className="text-emerald-600 h-5 w-5" />
@@ -343,7 +369,7 @@ function ReportsPage() {
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h3 className="text-xl font-black text-slate-800 dark:text-zinc-50 tracking-tight">Activity Density</h3>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Daily Transaction Volume Forecast</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Finalized Transaction Volume Forecast</p>
                 </div>
                 <div className="rounded-full bg-amber-100 p-2 dark:bg-amber-900/30">
                   <FiIcons.FiActivity className="text-amber-600 h-5 w-5" />

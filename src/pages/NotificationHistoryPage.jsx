@@ -3,6 +3,7 @@ import { FiBell, FiCheck, FiFilter, FiArrowLeft, FiTrash2 } from "react-icons/fi
 import { useNavigate } from "react-router-dom";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
+import api from "../utils/api";
 import clsx from "clsx";
 
 const iconToneStyles = {
@@ -22,46 +23,25 @@ function NotificationHistoryPage() {
 
   const fetchNotifications = () => {
     setLoading(true);
-    fetch("/api/notifications", {
-      headers: {
-        "Authorization": `Bearer ${user?.token}`,
-        "Accept": "application/json"
-      }
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch notifications");
-        return res.json();
-      })
-      .then((data) => setNotifications(data))
-      .catch((err) => toast.error(err.message))
+    api.get("/api/notifications")
+      .then((res) => setNotifications(Array.isArray(res.data) ? res.data : []))
+      .catch((err) => toast.error(err.response?.data?.message || "Failed to fetch notifications"))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    fetchNotifications();
-  }, []);
+    if (user?.token) fetchNotifications();
+  }, [user?.token]);
 
   const markAsRead = (ids) => {
-    fetch("/api/notifications/mark-as-read", {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${user?.token}`,
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({ notification_ids: ids }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Action failed");
-        return res.json();
-      })
-      .then((data) => {
+    api.post("/api/notifications/mark-as-read", { notification_ids: ids })
+      .then(() => {
         setNotifications((prev) =>
           prev.map((n) => (ids.includes(n.id) ? { ...n, read_at: new Date().toISOString() } : n))
         );
         toast.success("Marked as read");
       })
-      .catch((err) => toast.error(err.message));
+      .catch((err) => toast.error(err.response?.data?.message || "Action failed"));
   };
 
   const filteredNotifications = notifications.filter((n) => {

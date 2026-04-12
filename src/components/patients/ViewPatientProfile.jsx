@@ -815,6 +815,7 @@ function MedicalRecordsTab({ patient, isStaff, isVet }) {
   const [editingRecord, setEditingRecord] = useState(null);
 
   const [selectedAppointmentId, setSelectedAppointmentId] = useState("");
+  const [appointments, setAppointments] = useState([]);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [sendingRecord, setSendingRecord] = useState(null);
 
@@ -1063,7 +1064,7 @@ function MedicalRecordModal({
                  )}
                >
                  <option value="">Select an appointment...</option>
-                 {appointments.map(apt => (
+                 {(appointments || []).map(apt => (
                    <option key={apt.id} value={apt.id}>
                      {formatDate(apt.date)} - {apt.title}
                    </option>

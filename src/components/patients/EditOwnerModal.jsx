@@ -7,6 +7,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import PhoneInput from "../common/PhoneInput";
+import { FiChevronDown } from "react-icons/fi";
+import { PHILIPPINE_CITIES } from "../../constants/locations";
 
 const inputBase =
     "h-11 w-full rounded-xl border bg-slate-50 px-3 text-sm text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none dark:bg-dark-surface dark:text-zinc-200 dark:placeholder:text-gray-500 dark:focus:bg-gray-800";
@@ -16,9 +18,14 @@ const getInputClass = (error) => clsx(inputBase, error ? "border-red-400 focus:b
 const ownerSchema = z.object({
     name: z.string().min(1, "Owner name is required").max(255),
     phone: z.string()
-        .min(5, "Phone number is too short")
+        .min(10, "Phone number is too short")
         .max(20, "Phone number is too long")
-        .regex(/^\+?[1-9]\d{1,14}$/, "Please enter a valid international phone number"),
+        .refine((val) => {
+            const clean = val.replace(/[\s\(\)\-]/g, "");
+            return /^09\d{9}$/.test(clean) || /^\+639\d{9}$/.test(clean) || /^\+?[1-9]\d{1,14}$/.test(clean);
+        }, {
+            message: "Invalid phone: Use 09XXXXXXXXX or international format"
+        }),
     email: z.string().email("Invalid email address").max(255).optional().or(z.literal("")),
     address: z.string().max(255).optional().or(z.literal("")),
     city: z.string().max(255).optional().or(z.literal("")),
@@ -126,6 +133,7 @@ function EditOwnerModal({ isOpen, onClose, owner, onSaveSuccess }) {
                             <div>
                                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Phone *</label>
                                 <PhoneInput
+                                    key={`phone-${owner?.id}-${owner?.phone}`}
                                     value={phoneValue}
                                     onChange={(phone) => setValue("phone", phone, { shouldValidate: true })}
                                     error={errors.phone}
@@ -147,15 +155,35 @@ function EditOwnerModal({ isOpen, onClose, owner, onSaveSuccess }) {
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div className="sm:col-span-1">
                                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">City</label>
-                                <input {...register("city")} className={getInputClass(errors.city)} placeholder="City" />
+                                <div className="relative">
+                                    <select 
+                                        {...register("city")} 
+                                        className={clsx(inputBase, errors.city ? "border-red-400 focus:border-red-500" : "border-slate-200 focus:border-blue-300 dark:border-dark-border")}
+                                        onChange={(e) => {
+                                            const city = e.target.value;
+                                            setValue("city", city);
+                                            const data = PHILIPPINE_CITIES[city];
+                                            if (data) {
+                                                setValue("province", data.province);
+                                                setValue("zip", data.zip);
+                                            }
+                                        }}
+                                    >
+                                        <option value="">Select City...</option>
+                                        {Object.keys(PHILIPPINE_CITIES).sort().map(city => (
+                                            <option key={city} value={city}>{city}</option>
+                                        ))}
+                                    </select>
+                                    <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
+                                </div>
                             </div>
                             <div className="sm:col-span-1">
                                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Province</label>
-                                <input {...register("province")} className={getInputClass(errors.province)} placeholder="Province" />
+                                <input {...register("province")} className={clsx(inputBase, "bg-slate-100 dark:bg-dark-surface/50 border-slate-200 dark:border-dark-border")} placeholder="Province" readOnly />
                             </div>
                             <div className="sm:col-span-1">
                                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Zip</label>
-                                <input {...register("zip")} className={getInputClass(errors.zip)} placeholder="Zip" />
+                                <input {...register("zip")} className={clsx(inputBase, "bg-slate-100 dark:bg-dark-surface/50 border-slate-200 dark:border-dark-border")} placeholder="Zip" readOnly />
                             </div>
                         </div>
                     </form>

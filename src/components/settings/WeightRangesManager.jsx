@@ -3,17 +3,15 @@ import { FiEdit2, FiTrash2, FiPlus, FiSearch, FiX, FiSave, FiChevronLeft, FiChev
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import clsx from "clsx";
+import api from "../../utils/api";
 
-export default function WeightRangesManager() {
+export default function WeightRangesManager({ species = [], sizeCategories = [], isLoading = false, onRefetch }) {
   const { error, success } = useToast();
   const { user } = useAuth();
-  const [species, setSpecies] = useState([]);
-  const [selectedSpecies, setSelectedSpecies] = useState(null);
-  const [sizeCategories, setSizeCategories] = useState([]);
   
+  const [selectedSpecies, setSelectedSpecies] = useState(null);
   const [ranges, setRanges] = useState([]);
   const [loadingRanges, setLoadingRanges] = useState(false);
-  const [loadingSpecies, setLoadingSpecies] = useState(true);
   
   const [search, setSearch] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -31,55 +29,12 @@ export default function WeightRangesManager() {
   };
   const [formData, setFormData] = useState(initialForm);
 
-  // Fetch species and size categories on mount
+  // Set initial selected species when master data arrives
   useEffect(() => {
-    if (!user?.token) {
-      setLoadingSpecies(false);
-      return;
+    if (species.length > 0 && !selectedSpecies) {
+      setSelectedSpecies(species[0]);
     }
-    
-    let isMounted = true;
-    const init = async () => {
-      if (isMounted) setLoadingSpecies(true);
-      try {
-        const headers = {
-          "Authorization": `Bearer ${user.token}`,
-          "Accept": "application/json"
-        };
-        
-        const specPromise = fetch("/api/species", { headers }).then(r => r.ok ? r.json() : null).catch(e => { console.error("Error fetching species:", e); return null; });
-        const sizePromise = fetch("/api/pet-size-categories", { headers }).then(r => r.ok ? r.json() : null).catch(e => { console.error("Error fetching sizes:", e); return null; });
-        
-        const [specData, sizeData] = await Promise.all([specPromise, sizePromise]);
-        
-        if (!isMounted) return;
-
-        if (specData) {
-          const speciesList = Array.isArray(specData.data) ? specData.data : (Array.isArray(specData) ? specData : []);
-          setSpecies(speciesList);
-          if (speciesList.length > 0) {
-            setSelectedSpecies(speciesList[0]);
-          }
-        } else {
-          error("Failed to load species data.");
-        }
-        
-        if (sizeData) {
-          const sizeList = Array.isArray(sizeData.data) ? sizeData.data : (Array.isArray(sizeData) ? sizeData : []);
-          setSizeCategories(sizeList);
-        } else {
-          error("Failed to load pet size categories.");
-        }
-      } catch (err) {
-        console.error("Initialization error:", err);
-        if (isMounted) error(err.message || "Failed to load initial data");
-      } finally {
-        if (isMounted) setLoadingSpecies(false);
-      }
-    };
-    init();
-    return () => { isMounted = false; };
-  }, [error, user?.token]);
+  }, [species, selectedSpecies]);
 
   const fetchRanges = useCallback(async () => {
     if (!selectedSpecies || !user?.token) {
@@ -88,24 +43,14 @@ export default function WeightRangesManager() {
     }
     setLoadingRanges(true);
     try {
-      const query = new URLSearchParams({
-        species_id: selectedSpecies.id,
-        search: search,
-        per_page: "100" // Load all for this species for now
-      });
-      const res = await fetch(`/api/weight-ranges?${query.toString()}`, {
-        headers: {
-          "Authorization": `Bearer ${user.token}`,
-          "Accept": "application/json"
+      const res = await api.get("/api/weight-ranges", {
+        params: {
+          species_id: selectedSpecies.id,
+          search: search,
+          per_page: "100"
         }
       });
-      if (!res.ok) {
-        console.error(`[fetchRanges error] Status: ${res.status}`);
-        throw new Error("Failed to load weight ranges");
-      }
-      const result = await res.json();
-      
-      // Normalize: Handle both { data: [...] } and direct array [...]
+      const result = res.data;
       const normalizedData = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
       setRanges(normalizedData);
     } catch (err) {
@@ -169,24 +114,15 @@ export default function WeightRangesManager() {
     };
 
     try {
-      const res = await fetch(url, {
+      await api({
         method,
-        headers: { 
-            "Content-Type": "application/json", 
-            "Accept": "application/json",
-            "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify(payload)
+        url,
+        data: payload
       });
-      
-      if (!res.ok) {
-        const result = await res.json();
-        console.error("[handleSave error]:", result);
-        throw new Error(result.message || "Failed to save range");
-      }
       
       success(`Weight range ${isEditing ? "updated" : "added"} successfully`);
       fetchRanges();
+      onRefetch?.();
       setIsModalOpen(false);
     } catch (err) {
       console.error("[handleSave catch]:", err);
@@ -199,29 +135,32 @@ export default function WeightRangesManager() {
   const handleDelete = async (id) => {
     if (!confirm("Are you sure you want to delete this weight range?")) return;
     try {
-      const res = await fetch(`/api/weight-ranges/${id}`, { 
-          method: "DELETE",
-          headers: {
-              "Authorization": `Bearer ${user?.token}`,
-              "Accept": "application/json"
-          }
-      });
-      if (!res.ok) {
-          console.error(`[handleDelete error] Status: ${res.status}`);
-          throw new Error("Failed to delete range");
-      }
+      await api.delete(`/api/weight-ranges/${id}`);
       success("Weight range deleted");
       fetchRanges();
+      onRefetch?.();
     } catch (err) {
       console.error("[handleDelete catch]:", err);
       error(err.message);
     }
   };
 
-  if (loadingSpecies) {
+  if (isLoading && species.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="text-slate-500 animate-pulse font-medium">Loading species master data...</div>
+        <div className="text-slate-500 animate-pulse font-medium italic tracking-widest text-xs uppercase">Syncing clinical benchmarks...</div>
+      </div>
+    );
+  }
+
+  if (species.length === 0) {
+    return (
+      <div className="card-shell p-12 text-center border-dashed border-2">
+        <FiAlertTriangle className="mx-auto h-12 w-12 text-slate-300 mb-4" />
+        <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100">No Species Configured</h3>
+        <p className="text-sm text-slate-500 max-w-xs mx-auto mt-2">
+          You must define at least one species in the "Species & Breeds" tab before you can manage weight brackets.
+        </p>
       </div>
     );
   }

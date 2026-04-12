@@ -61,13 +61,15 @@ class MedicalRecordController extends Controller
             $record->load('pet.owner');
             $owner = $record->pet->owner;
             if ($owner) {
+                $clinicName = \App\Models\Setting::where('key', 'clinic_name')->value('value') ?? 'Our Clinic';
                 $this->clientNotificationService->sendFromTemplate(
                     $owner,
                     'medical_summary_notice',
                     'email',
                     [
                         'pet_name' => $record->pet->name,
-                        'diagnosis' => $record->diagnosis ?: 'N/A'
+                        'diagnosis' => $record->diagnosis ?: 'N/A',
+                        'clinic_name' => $clinicName,
                     ],
                     'automated',
                     $record

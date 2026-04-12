@@ -172,7 +172,7 @@ class DashboardController extends Controller
     {
         $totalPets = Pet::count();
         $totalOwners = \App\Models\Owner::count();
-        $monthlyRevenue = Invoice::whereIn('status', ['Finalized', 'Paid', 'Partially Paid'])
+        $monthlyRevenue = Invoice::realized()
             ->whereMonth('created_at', now()->month)
             ->whereYear('created_at', now()->year)
             ->sum('total');
@@ -183,7 +183,7 @@ class DashboardController extends Controller
         $lowStockItems = Inventory::lowStock()->count();
 
         // Calculate revenue growth
-        $lastMonthRevenue = Invoice::whereIn('status', ['Finalized', 'Paid', 'Partially Paid'])
+        $lastMonthRevenue = Invoice::realized()
             ->whereMonth('created_at', now()->subMonth()->month)
             ->whereYear('created_at', now()->subMonth()->year)
             ->sum('total');
@@ -220,7 +220,7 @@ class DashboardController extends Controller
                 'id' => 'stat-2',
                 'title' => 'Monthly Revenue',
                 'value' => '₱' . number_format($monthlyRevenue, 0),
-                'detail' => 'Gross income this month',
+                'detail' => 'Realized income this month',
                 'iconName' => 'FiDollarSign',
                 'iconBg' => 'bg-emerald-100 dark:bg-emerald-900/30',
                 'iconColor' => 'text-emerald-600 dark:text-emerald-400',
@@ -372,11 +372,14 @@ class DashboardController extends Controller
             if ($notif->type === 'LowStockAlert') {
                 $iconName = 'FiAlertTriangle';
                 $tone = 'danger';
-            } elseif (str_contains($notif->type, 'Patient')) {
-                $iconName = 'FiPlusCircle';
+            } elseif (str_contains($notif->type, 'Patient') || $notif->type === 'PatientAdded') {
+                $iconName = 'FiHeart';
                 $tone = 'success';
             } elseif (str_contains($notif->type, 'Appointment')) {
                 $iconName = 'FiCalendar';
+                $tone = 'info';
+            } elseif ($notif->type === 'OwnerRegistered' || $notif->type === 'ClientCommunication') {
+                $iconName = 'FiUser';
                 $tone = 'info';
             }
 

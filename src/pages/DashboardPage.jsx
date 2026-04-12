@@ -6,6 +6,7 @@ import AiSalesForecastCard from "../components/dashboard/AiSalesForecastCard";
 import * as Icons from "react-icons/fi";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../constants/roles";
+import api from "../utils/api";
 
 function DashboardPage() {
   const [apiStatus, setApiStatus] = useState(null);
@@ -16,51 +17,74 @@ function DashboardPage() {
   const isStaff = user?.role === ROLES.STAFF;
 
   useEffect(() => {
+    let isMounted = true;
     if (!user?.token) return;
     setIsLoading(true);
-    const headers = { 
-      "Accept": "application/json",
-      "Authorization": `Bearer ${user.token}`
-    };
+
     Promise.all([
-      fetch("/api/status", { headers }).then(res => res.json()),
-      fetch("/api/dashboard/stats", { headers }).then(res => res.json()),
-      fetch("/api/dashboard/notifications", { headers }).then(res => res.json())
+      api.get("/api/status").catch(() => ({ data: { message: "Status offline" } })),
+      api.get("/api/dashboard/stats").catch(() => ({ data: [] })),
+      api.get("/api/dashboard/notifications").catch(() => ({ data: [] }))
     ])
-      .then(([status, statsData, notifData]) => {
+      .then(([statusRes, statsRes, notifRes]) => {
+        if (!isMounted) return;
+        const status = statusRes.data;
+        const statsData = statsRes.data;
+        const notifData = notifRes.data;
+
         setApiStatus(status);
         
         const safeStats = Array.isArray(statsData) ? statsData : [];
-        // Map icon names to components for metrics
-        const mappedMetrics = safeStats
-          .filter(stat => !(isStaff && stat.title === "Monthly Revenue"))
-          .map(stat => ({
-            ...stat,
-            icon: Icons[stat.iconName] || Icons.FiActivity
-          }));
-        setMetrics(mappedMetrics);
+        if (safeStats.length > 0) {
+          const mappedMetrics = safeStats
+            .filter(stat => !(isStaff && stat.title === "Monthly Revenue"))
+            .map(stat => ({
+              ...stat,
+              icon: Icons[stat.iconName] || Icons.FiActivity
+            }));
+          setMetrics(mappedMetrics);
+        }
 
         const safeNotifs = Array.isArray(notifData) ? notifData : [];
-        // Map icon names to components for notifications
-        const mappedNotifs = safeNotifs.map(notif => ({
-          ...notif,
-          icon: Icons[notif.iconName] || Icons.FiBell
-        }));
-        setNotifications(mappedNotifs);
+        if (safeNotifs.length > 0) {
+          const mappedNotifs = safeNotifs.map(notif => ({
+            ...notif,
+            icon: Icons[notif.iconName] || Icons.FiBell
+          }));
+          setNotifications(mappedNotifs);
+        }
         
         setIsLoading(false);
       })
       .catch((err) => {
+        if (!isMounted) return;
         console.error("Dashboard Fetch Error:", err);
         setIsLoading(false);
       });
+
+    return () => {
+      isMounted = false;
+    };
   }, [user?.token]);
 
   const handleMarkAllRead = () => {
+    // Persistent backend update
+    api.post("/api/notifications/mark-as-read", { all: true })
+      .catch(err => console.error("Failed to mark all as read:", err));
+    
+    // Immediate UI update
     setNotifications([]);
   };
 
   const handleDismissNotification = (id) => {
+    const notif = notifications.find(n => n.id === id);
+    if (notif?.db_id) {
+      // Persistent backend update for specific notification
+      api.post("/api/notifications/mark-as-read", { notification_ids: [notif.db_id] })
+        .catch(err => console.error("Failed to dismiss notification:", err));
+    }
+    
+    // Immediate UI update
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 

@@ -3,6 +3,8 @@ import { FiCircle } from "react-icons/fi";
 import { LuSparkles } from "react-icons/lu";
 import { formatCurrency, formatCurrencyShort } from "../../utils/formatters";
 import clsx from "clsx";
+import api from "../../utils/api";
+import { useAuth } from "../../context/AuthContext";
 
 const WIDTH = 760;
 const HEIGHT = 320;
@@ -21,19 +23,32 @@ function AiSalesForecastCard() {
     const [data, setData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
+    const { user } = useAuth();
+
     useEffect(() => {
-        setIsLoading(true);
-        fetch(`/api/dashboard/sales-forecast?range=${activeRange}`)
-            .then(res => res.json())
-            .then(fetchedData => {
-                setData(fetchedData);
+        let isMounted = true;
+        if (!user?.token) return;
+        
+        // Show loading only on initial fetch or when range explicitly changes
+        if (data.length === 0) setIsLoading(true);
+        
+        api.get(`/api/dashboard/sales-forecast?range=${activeRange}`)
+            .then(res => {
+                if (!isMounted) return;
+                setData(res.data);
                 setIsLoading(false);
             })
             .catch(err => {
+                if (!isMounted) return;
                 console.error("Failed to fetch forecast:", err);
+                // Keep existing data on error, just stop loading
                 setIsLoading(false);
             });
-    }, [activeRange]);
+
+        return () => {
+            isMounted = false;
+        };
+    }, [activeRange, user?.token]);
 
     const safeData = Array.isArray(data) ? data : [];
     const allValues = safeData.flatMap((entry) => [entry.actual, entry.forecast]).filter((value) => value !== null);
@@ -77,7 +92,7 @@ function AiSalesForecastCard() {
                 <div>
                     <h3 className="text-2xl font-black tracking-tight text-slate-800 dark:text-zinc-50 flex items-center gap-2">
                         <LuSparkles className="text-emerald-500 w-6 h-6" />
-                        Sales Intelligence
+                        Sales Insights
                     </h3>
                     <p className="mt-1 text-sm font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">Revenue Projection • AI Synthesis</p>
                 </div>

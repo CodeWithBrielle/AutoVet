@@ -4,7 +4,7 @@ import ClientNotificationHistory from "../components/notifications/ClientNotific
 import { FiArrowLeft } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 
-function ClientNotificationHistoryPage() {
+function SentNotificationsPage() {
   const navigate = useNavigate();
   return (
     <div className="space-y-6">
@@ -22,4 +22,4 @@ function ClientNotificationHistoryPage() {
   );
 }
 
-export default ClientNotificationHistoryPage;
+export default SentNotificationsPage;

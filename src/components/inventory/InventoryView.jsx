@@ -17,13 +17,13 @@ import { LuPill, LuSparkles } from "react-icons/lu";
 import AddInventoryModal from "./AddInventoryModal";
 import ViewInventoryModal from "./ViewInventoryModal";
 import { useAuth } from "../../context/AuthContext";
-import { ROLES } from "../../constants/roles";
+import { ROLES, FULL_ACCESS_ROLES } from "../../constants/roles";
 import { getInventoryStatus, getStatusStyles, INVENTORY_STATUS, isExpiringSoon } from "../../utils/inventoryStatus";
 
 const categoryIcons = {
   Medicines: LuPill,
   Vaccines: FiPackage,
-  Consumables: FiTrendingUp,
+  "Required Items": FiTrendingUp,
   Retail: FiBox,
   Supplies: FiPackage,
   "Clinic assets": FiBarChart2,
@@ -32,7 +32,7 @@ const categoryIcons = {
 const categoryIconStyles = {
   Medicines: "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400 font-bold",
   Vaccines: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold",
-  Consumables: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 font-bold",
+  "Required Items": "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 font-bold",
   Retail: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 font-bold",
   Supplies: "bg-slate-100 text-slate-600 dark:bg-slate-900/30 dark:text-slate-400 font-bold",
   "Clinic assets": "bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400 font-bold",
@@ -65,7 +65,7 @@ function InventoryView() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [aiForecastData, setAiForecastData] = useState(null);
   const { user } = useAuth();
-  const isAdmin = user?.role === ROLES.ADMIN;
+  const isPowerUser = FULL_ACCESS_ROLES.includes(user?.role);
 
   useEffect(() => {
     const fetchInventory = async () => {
@@ -224,9 +224,9 @@ function InventoryView() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-4xl font-bold tracking-tight text-slate-900 dark:text-zinc-50">Internal Inventory Management</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">Clinics &gt; Downtown Branch &gt; Stock Control &amp; Forecasting</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">Clinics &gt; Downtown Branch &gt; Stock Control &amp; Trends</p>
         </div>
-        {isAdmin && (
+        {isPowerUser && (
           <button
             onClick={handleRunForecast}
             disabled={isSimulating}
@@ -236,7 +236,7 @@ function InventoryView() {
             )}
           >
             <LuSparkles className={clsx("h-4 w-4", isSimulating && "animate-spin")} />
-            {isSimulating ? "Analyzing..." : "Run AI Forecast"}
+            {isSimulating ? "Analyzing..." : "Refresh Trends"}
           </button>
         )}
       </div>
@@ -274,7 +274,7 @@ function InventoryView() {
               <p className="text-[10px] font-black uppercase tracking-widest text-blue-200">System Optimization</p>
             </div>
             <p className="text-2xl font-black leading-tight">6 Flagged SKUs</p>
-            <p className="mt-2 text-xs text-slate-400 font-bold leading-relaxed">AI suggests reordering Vaccines and Consumables due to predicted uptick next week.</p>
+            <p className="mt-2 text-xs text-slate-400 font-bold leading-relaxed">AI suggests reordering Vaccines and Clinic Supplies due to predicted uptick next week.</p>
           </div>
           {/* Decorative Background Element */}
           <div className="absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-blue-600/10 blur-3xl" />
@@ -348,7 +348,7 @@ function InventoryView() {
               >
                 Expiring
               </button>
-              {isAdmin && (
+              {isPowerUser && (
                 <button
                   onClick={() => setIsAddModalOpen(true)}
                   className="ml-2 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm"

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { FiActivity, FiSearch, FiChevronDown, FiChevronUp } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 import clsx from "clsx";
 
 function AuditLogTab() {
@@ -17,37 +18,32 @@ function AuditLogTab() {
   });
   const [expandedId, setExpandedId] = useState(null);
 
+  const hasFetchedRef = useRef(false);
+
   useEffect(() => {
-    const controller = new AbortController();
-    const signal = controller.signal;
+    let isMounted = true;
 
     const fetchLogs = async () => {
       if (!user?.token) return;
       
-      setLoading(true);
-      const params = new URLSearchParams(filters);
+      // Show loading only on first fetch
+      if (!hasFetchedRef.current) setLoading(true);
       
       try {
-        const response = await fetch(`/api/audit-logs?${params.toString()}`, {
-          signal,
-          headers: {
-            "Authorization": `Bearer ${user.token}`,
-            "Accept": "application/json"
-          }
+        const response = await api.get("/api/audit-logs", {
+          params: filters
         });
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch audit logs");
-        }
-
-        const data = await response.json();
-        setLogs(data.data || []);
+        if (!isMounted) return;
+        setLogs(response.data?.data || []);
+        hasFetchedRef.current = true;
       } catch (err) {
-        if (err.name === "AbortError") return;
-        console.error(err);
-        toast.error(err.message);
+        if (!isMounted) return;
+        console.error("[AuditLogTab] fetch error:", err);
+        // Preserve existing logs on failure per plan
+        toast.error("Unable to refresh audit logs. Using cached data.");
       } finally {
-        if (!signal.aborted) {
+        if (isMounted) {
           setLoading(false);
         }
       }
@@ -59,7 +55,7 @@ function AuditLogTab() {
     }, 500);
 
     return () => {
-      controller.abort();
+      isMounted = false;
       clearTimeout(timer);
     };
   }, [filters, user?.token]);

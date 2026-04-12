@@ -74,6 +74,18 @@ class ClientNotificationService
                 'sent_at' => now(),
             ]);
 
+            // Create in-app notification for staff
+            \App\Models\Notification::create([
+                'type' => 'ClientCommunication',
+                'title' => 'Notification Sent',
+                'message' => "Successfully sent {$channel} to {$owner->name}.",
+                'data' => [
+                    'client_notification_id' => $notification->id,
+                    'owner_id' => $owner->id,
+                    'channel' => $channel
+                ]
+            ]);
+
             return $notification;
 
         } catch (\Exception $e) {
@@ -89,6 +101,7 @@ class ClientNotificationService
 
     /**
      * Interpolate variables in a string.
+     * Supports both {var} and [var] placeholder formats.
      */
     public function interpolateVariables(string $text, array $variables, ?Owner $owner = null): string
     {
@@ -97,7 +110,9 @@ class ClientNotificationService
         }
 
         foreach ($variables as $key => $value) {
-            $text = str_replace('{' . $key . '}', $value, $text);
+            // Support both {var} and [var] placeholder formats
+            $text = str_replace('{' . $key . '}', $value ?? '', $text);
+            $text = str_replace('[' . $key . ']', $value ?? '', $text);
         }
 
         return $text;

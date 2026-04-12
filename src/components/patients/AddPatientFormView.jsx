@@ -7,11 +7,13 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
-import { useAuth } from "../../context/AuthContext";
-import PhoneInput from "../common/PhoneInput";
 import { getAgeGroup } from "../../utils/petAgeGroups";
+import { useAuth } from "../../context/AuthContext";
+import { PHILIPPINE_CITIES } from "../../constants/locations";
+import PhoneInput from "../common/PhoneInput";
 
 const steps = ["Pet Information", "Owner Details", "Medical History"];
+ 
 
 const inputBase =
   "h-12 w-full rounded-xl border bg-slate-50 px-4 text-base text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none dark:bg-dark-surface dark:text-zinc-200 dark:placeholder:text-gray-500 dark:focus:bg-gray-800";
@@ -72,12 +74,30 @@ const patientSchema = z.object({
         message: "Owner phone is required for new owners",
         path: ["owner_phone"]
       });
-    } else if (!/^\+?[1-9]\d{1,14}$/.test(data.owner_phone)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Invalid phone number format",
-        path: ["owner_phone"]
-      });
+    } else {
+      // Clean phone for testing: remove spaces/dashes/parentheses
+      const cleanPhone = data.owner_phone.replace(/[\s\(\)\-]/g, "");
+      
+      // PH Mobile: 09XXXXXXXXX (11 digits) or +639XXXXXXXXX (13 chars)
+      const isPHLocal = /^09\d{9}$/.test(cleanPhone);
+      const isPHIntl = /^\+639\d{9}$/.test(cleanPhone);
+      const isGenIntl = /^\+?[1-9]\d{1,14}$/.test(cleanPhone);
+
+      if (!isPHLocal && !isPHIntl && !isGenIntl) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Invalid phone: Use 09XXXXXXXXX or international format",
+          path: ["owner_phone"]
+        });
+      }
+      
+      if ((isPHLocal || isPHIntl) && cleanPhone.replace("+63", "0").length !== 11) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "PH mobile number must be 11 digits",
+            path: ["owner_phone"]
+          });
+      }
     }
   }
 });
@@ -531,8 +551,42 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
                       <input type="email" {...register("owner_email")} className={getInputClass(errors.owner_email)} placeholder="owner@example.com" />
                     </div>
                     <div className="lg:col-span-2">
-                      <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Street Address</label>
-                      <input {...register("owner_address")} className={getInputClass(errors.owner_address)} placeholder="123 Main St" />
+                       <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Street Address</label>
+                       <input {...register("owner_address")} className={getInputClass(errors.owner_address)} placeholder="123 Main St" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">City *</label>
+                      <div className="relative">
+                        <select 
+                          {...register("owner_city")} 
+                          className={getSelectClass(errors.owner_city)}
+                          onChange={(e) => {
+                            const city = e.target.value;
+                            setValue("owner_city", city);
+                            const data = PHILIPPINE_CITIES[city];
+                            if (data) {
+                              setValue("owner_province", data.province);
+                              setValue("owner_zip", data.zip);
+                            }
+                          }}
+                        >
+                          <option value="">Select City...</option>
+                          {Object.keys(PHILIPPINE_CITIES).sort().map(city => (
+                            <option key={city} value={city}>{city}</option>
+                          ))}
+                        </select>
+                        <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Province</label>
+                        <input {...register("owner_province")} className={clsx(getInputClass(errors.owner_province), "bg-slate-100 dark:bg-dark-surface/50")} placeholder="Province" readOnly />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Zip Code</label>
+                        <input {...register("owner_zip")} className={clsx(getInputClass(errors.owner_zip), "bg-slate-100 dark:bg-dark-surface/50")} placeholder="Zip" readOnly />
+                      </div>
                     </div>
                   </div>
                 ) : (

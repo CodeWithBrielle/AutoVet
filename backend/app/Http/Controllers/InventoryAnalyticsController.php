@@ -39,7 +39,7 @@ class InventoryAnalyticsController extends Controller
     {
         // Calculate usage from both transactions (Adjustment Out, etc) and Invoice Items
         $topItems = InvoiceItem::with('inventory:id,item_name,sku')
-            ->select('inventory_id', DB::raw('SUM(quantity) as total_quantity'))
+            ->select('inventory_id', DB::raw('SUM(qty) as total_quantity'))
             ->whereNotNull('inventory_id')
             ->groupBy('inventory_id')
             ->orderBy('total_quantity', 'desc')

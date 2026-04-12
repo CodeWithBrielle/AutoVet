@@ -7,6 +7,7 @@ use App\Traits\HasSyncFields;
 use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Notification;
 
 class Owner extends Model
 {
@@ -19,6 +20,21 @@ class Owner extends Model
         // Sync fields
         'uuid', 'sync_status', 'synced_at', 'last_modified_locally_at',
     ];
+
+    protected static function booted()
+    {
+        static::created(function ($owner) {
+            Notification::create([
+                'type' => 'OwnerRegistered',
+                'title' => 'New Owner Registered',
+                'message' => "{$owner->name} has been added to the system.",
+                'data' => [
+                    'owner_id' => $owner->id,
+                    'name' => $owner->name
+                ]
+            ]);
+        });
+    }
 
     protected $casts = [
         'synced_at'                => 'datetime',

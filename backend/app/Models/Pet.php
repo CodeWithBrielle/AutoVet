@@ -7,6 +7,7 @@ use App\Traits\HasSyncFields;
 use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Notification;
 
 class Pet extends Model
 {
@@ -65,6 +66,19 @@ class Pet extends Model
                     $pet->age_group = 'Senior';
                 }
             }
+        });
+
+        static::created(function ($pet) {
+            Notification::create([
+                'type' => 'PatientAdded',
+                'title' => 'New Patient Added',
+                'message' => "{$pet->name} has been added to the system.",
+                'data' => [
+                    'pet_id' => $pet->id,
+                    'name' => $pet->name,
+                    'owner_id' => $pet->owner_id
+                ]
+            ]);
         });
     }
 

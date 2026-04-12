@@ -26,6 +26,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 import ManualSendModal from "../notifications/ManualSendModal";
 
 const viewModes = ["Month", "Week", "Day"];
@@ -99,15 +100,9 @@ function AppointmentsView() {
 
   const fetchAppointments = () => {
     if (!user?.token) return;
-    fetch("/api/appointments", {
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Bearer ${user.token}`
-      }
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        // Ensure data is an array
+    api.get("/api/appointments")
+      .then((res) => {
+        const data = res.data;
         if (Array.isArray(data)) {
           setAppointments(data);
         } else if (data && typeof data === "object" && Array.isArray(data.appointments)) {
@@ -123,57 +118,45 @@ function AppointmentsView() {
   };
 
   useEffect(() => {
+    let isMounted = true;
     if (!user?.token) return;
-    fetchAppointments();
 
-    const headers = {
-      "Accept": "application/json",
-      "Authorization": `Bearer ${user.token}`
+    Promise.all([
+      api.get("/api/appointments").catch(() => ({ data: [] })),
+      api.get("/api/owners").catch(() => ({ data: [] })),
+      api.get("/api/pets").catch(() => ({ data: [] })),
+      api.get("/api/services").catch(() => ({ data: [] })),
+      api.get("/api/vets").catch(() => ({ data: [] })),
+      api.get("/api/settings").catch(() => ({ data: {} })),
+      api.get("/api/dashboard/appointment-forecast").catch(() => ({ data: null }))
+    ]).then(([apptRes, ownersRes, petsRes, servicesRes, vetsRes, settingsRes, forecastRes]) => {
+      if (!isMounted) return;
+
+      const apptData = apptRes.data;
+      if (Array.isArray(apptData)) {
+        setAppointments(apptData);
+      } else if (apptData && Array.isArray(apptData.appointments)) {
+        setAppointments(apptData.appointments);
+      } else {
+        setAppointments([]);
+      }
+
+      setOwners(Array.isArray(ownersRes.data) ? ownersRes.data : []);
+      setPets(Array.isArray(petsRes.data) ? petsRes.data : []);
+      setServices(Array.isArray(servicesRes.data) ? servicesRes.data : []);
+      setVets(Array.isArray(vetsRes.data) ? vetsRes.data : []);
+
+      const settingsData = settingsRes.data;
+      const inv = settingsData.inventory_categories ? JSON.parse(settingsData.inventory_categories) : [];
+      const svc = settingsData.service_categories ? JSON.parse(settingsData.service_categories) : [];
+      setCategories([...new Set([...inv, ...svc])]);
+
+      if (forecastRes.data) setAiForecast(forecastRes.data);
+    });
+
+    return () => {
+      isMounted = false;
     };
-
-    fetch("/api/owners", { headers })
-      .then((res) => res.json())
-      .then((data) => setOwners(Array.isArray(data) ? data : []))
-      .catch((err) => console.error("Error fetching owners:", err));
-
-    fetch("/api/pets", { headers })
-      .then((res) => res.json())
-      .then((data) => setPets(Array.isArray(data) ? data : []))
-      .catch((err) => console.error("Error fetching pets:", err));
-
-    fetch("/api/services", { headers })
-      .then((res) => res.json())
-      .then((data) => setServices(Array.isArray(data) ? data : []))
-      .catch((err) => console.error("Error fetching services:", err));
-
-    fetch("/api/vets", { headers })
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setVets(data);
-        } else {
-          setVets([]);
-        }
-      })
-      .catch((err) => {
-        console.error("Error fetching vets:", err);
-        setVets([]);
-      });
-
-    fetch("/api/settings", { headers })
-      .then(res => res.json())
-      .then(data => {
-        const inv = data.inventory_categories ? JSON.parse(data.inventory_categories) : [];
-        const svc = data.service_categories ? JSON.parse(data.service_categories) : [];
-        setCategories([...new Set([...inv, ...svc])]);
-      })
-      .catch(() => setCategories([]));
-
-    // Fetch initial AI forecast
-    fetch("/api/dashboard/appointment-forecast", { headers })
-      .then(res => res.json())
-      .then(data => setAiForecast(data))
-      .catch(() => { });
   }, [user?.token]);
 
   const handleReviewHints = () => {
@@ -199,26 +182,14 @@ function AppointmentsView() {
       if (payload.service_id) payload.service_id = Number(payload.service_id);
       if (payload.vet_id) payload.vet_id = Number(payload.vet_id);
 
-      const response = await fetch("/api/appointments", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.message || "Failed to schedule appointment.");
-      }
+      await api.post("/api/appointments", payload);
 
       toast.success("Appointment Scheduled!");
       reset();
       fetchAppointments();
     } catch (err) {
-      toast.error(err.message);
+      const message = err.response?.data?.message || err.message || "Failed to schedule appointment.";
+      toast.error(message);
     }
   };
 
@@ -238,51 +209,42 @@ function AppointmentsView() {
 
   const handleStatusUpdate = async (id, status) => {
     try {
-      const response = await fetch(`/api/appointments/${id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify({
-          ...selectedAppointment,
-          status,
-          pet_id: selectedAppointment.pet_id,
-          service_id: selectedAppointment.service_id,
-          date: selectedAppointment.date,
-          time: selectedAppointment.time?.substring(0, 5), // Ensure HH:mm format
-        }),
+      await api.put(`/api/appointments/${id}`, {
+        ...selectedAppointment,
+        status,
+        pet_id: selectedAppointment.pet_id,
+        service_id: selectedAppointment.service_id,
+        date: selectedAppointment.date,
+        time: selectedAppointment.time?.substring(0, 5), // Ensure HH:mm format
       });
 
-      if (!response.ok) throw new Error("Failed to update status");
-
-      toast.success(`Appointment marked as ${status}`);
+      toast.success(`Appointment marked as ${status.replace('_', ' ')}`);
       fetchAppointments();
       // Update local state if needed
       setSelectedAppointment(prev => ({ ...prev, status }));
     } catch (err) {
-      toast.error(err.message);
+      let errorMessage = "Failed to update status";
+      if (err.response?.data?.errors) {
+        errorMessage = Object.values(err.response.data.errors).flat().join(", ");
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      toast.error(errorMessage);
     }
   };
 
   const handleDeleteAppointment = async (id) => {
     if (!window.confirm("Are you sure you want to cancel/delete this appointment?")) return;
     try {
-      const response = await fetch(`/api/appointments/${id}`, {
-        method: "DELETE",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        }
-      });
-      if (!response.ok) throw new Error("Failed to delete appointment");
+      await api.delete(`/api/appointments/${id}`);
       toast.success("Appointment Deleted");
       setActivePanel("booking");
       setSelectedAppointment(null);
       fetchAppointments();
     } catch (err) {
-      toast.error(err.message);
+      toast.error(err.response?.data?.message || err.message || "Failed to delete appointment");
     }
   };
 
@@ -379,11 +341,12 @@ function AppointmentsView() {
                   <div className="mt-2 space-y-1.5">
                     {entry.events.map((event) => {
                       const statusColors = {
-                        pending: "border-amber-400/50 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300",
-                        completed: "border-emerald-400/50 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300",
-                        cancelled: "border-rose-400/50 bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300",
+                        pending: "border-blue-400 bg-blue-50/80 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200",
+                        in_progress: "border-orange-400 bg-orange-50/80 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200",
+                        completed: "border-emerald-400 bg-emerald-50/80 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
+                        cancelled: "border-rose-400 bg-rose-50/80 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
                       };
-                      const currentColor = statusColors[event.status] || "border-blue-400/50 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300";
+                      const currentColor = statusColors[event.status?.toLowerCase()] || "border-slate-400 bg-slate-50 text-slate-700 dark:bg-slate-900/20 dark:text-slate-300";
 
                       return (
                         <article
@@ -549,14 +512,16 @@ function AppointmentsView() {
                     <h4 className="text-3xl font-black tracking-tight text-slate-900 dark:text-zinc-50 truncate italic leading-tight">{selectedAppointment?.title}</h4>
                     <div className={clsx(
                       "mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2 text-xs font-black uppercase tracking-widest shadow-lg",
-                      selectedAppointment?.status === "completed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                        selectedAppointment?.status === "cancelled" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
-                          "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                      selectedAppointment?.status?.toLowerCase() === "completed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                        selectedAppointment?.status?.toLowerCase() === "cancelled" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
+                          selectedAppointment?.status?.toLowerCase() === "in_progress" ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" :
+                            "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
                     )}>
-                      {selectedAppointment?.status === "completed" && <FiCheckCircle className="h-4 w-4" />}
-                      {selectedAppointment?.status === "cancelled" && <FiXCircle className="h-4 w-4" />}
-                      {selectedAppointment?.status === "pending" && <FiAlertCircle className="h-4 w-4" />}
-                      {selectedAppointment?.status || "pending"}
+                      {selectedAppointment?.status?.toLowerCase() === "completed" && <FiCheckCircle className="h-4 w-4" />}
+                      {selectedAppointment?.status?.toLowerCase() === "cancelled" && <FiXCircle className="h-4 w-4" />}
+                      {selectedAppointment?.status?.toLowerCase() === "in_progress" && <FiAlertCircle className="h-4 w-4" />}
+                      {selectedAppointment?.status?.toLowerCase() === "pending" && <FiClock className="h-4 w-4" />}
+                      {selectedAppointment?.status === "pending" ? "Scheduled" : selectedAppointment?.status?.replace('_', '-') || "Scheduled"}
                     </div>
                   </div>
                 </div>
@@ -576,7 +541,7 @@ function AppointmentsView() {
                       <FiClock className="h-6 w-6 text-blue-500" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Arrival Time</p>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Appointment Time</p>
                       <p className="text-lg font-black text-slate-800 dark:text-zinc-100 italic">{selectedAppointment?.time?.substring(0, 5)}</p>
                     </div>
                   </div>
@@ -604,40 +569,56 @@ function AppointmentsView() {
 
                 <div className="pt-6">
                   <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 text-center mb-6">Security & Lifecycle Actions</p>
-
                   <button
                     onClick={() => setIsSendModalOpen(true)}
-                    className="mb-4 w-full flex h-14 items-center justify-center gap-3 rounded-2xl bg-blue-100 text-sm font-black uppercase tracking-widest text-blue-700 shadow-xl shadow-blue-200/50 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-800/50 transition-all active:scale-95"
+                    className="mb-8 w-full flex h-14 items-center justify-center gap-3 rounded-2xl bg-blue-100 text-sm font-black uppercase tracking-widest text-blue-700 shadow-xl shadow-blue-200/50 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-800/50 transition-all active:scale-95"
                   >
                     <FiBell className="h-5 w-5" />
                     Send Reminder
                   </button>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "pending")}
+                      className="flex h-16 flex-col items-center justify-center gap-1 rounded-2xl bg-blue-100 text-[10px] font-black uppercase tracking-widest text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 transition-all active:scale-95"
+                    >
+                      <FiClock className="h-5 w-5" />
+                      Scheduled
+                    </button>
+                    <button
+                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "in_progress")}
+                      className="flex h-16 flex-col items-center justify-center gap-1 rounded-2xl bg-orange-100 text-[10px] font-black uppercase tracking-widest text-orange-700 hover:bg-orange-200 dark:bg-orange-900/40 dark:text-orange-300 transition-all active:scale-95"
+                    >
+                      <FiAlertCircle className="h-5 w-5" />
+                      In-Progress
+                    </button>
                     <button
                       onClick={() => handleStatusUpdate(selectedAppointment?.id, "completed")}
-                      className="flex h-16 items-center justify-center gap-3 rounded-2xl bg-emerald-600 text-sm font-black uppercase tracking-widest text-white shadow-xl shadow-emerald-500/30 hover:bg-emerald-700 transition-all active:scale-95"
+                      className="flex h-16 flex-col items-center justify-center gap-1 rounded-2xl bg-emerald-600 text-[10px] font-black uppercase tracking-widest text-white shadow-xl shadow-emerald-500/30 hover:bg-emerald-700 transition-all active:scale-95"
                     >
-                      <FiCheckCircle className="h-6 w-6" />
-                      Close Case
-                    </button>
-                    <button
-                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "cancelled")}
-                      className="flex h-16 items-center justify-center gap-3 rounded-2xl bg-slate-100 text-sm font-black uppercase tracking-widest text-slate-700 shadow-xl shadow-slate-200/50 hover:bg-slate-200 dark:bg-dark-surface dark:text-zinc-300 dark:hover:bg-dark-border transition-all active:scale-95"
-                    >
-                      <FiXCircle className="h-6 w-6" />
-                      Discard
+                      <FiCheckCircle className="h-5 w-5" />
+                      Completed
                     </button>
                   </div>
-                  <button
-                    onClick={() => handleDeleteAppointment(selectedAppointment?.id)}
-                    className="flex h-16 w-full items-center justify-center gap-3 rounded-2xl border-2 border-rose-100 text-sm font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 dark:border-rose-900/30 dark:hover:bg-rose-900/10 transition-all active:scale-95 mt-4"
-                  >
-                    <FiTrash2 className="h-6 w-6" />
-                    Purple heart Wipe
-                  </button>
+
+                  <div className="grid grid-cols-2 gap-4 mt-6">
+                    <button
+                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "cancelled")}
+                      className="flex h-14 items-center justify-center gap-3 rounded-2xl bg-slate-100 text-xs font-black uppercase tracking-widest text-slate-700 shadow-lg shadow-slate-200/50 hover:bg-slate-200 dark:bg-dark-surface dark:text-zinc-300 dark:hover:bg-dark-border transition-all active:scale-95"
+                    >
+                      <FiXCircle className="h-5 w-5" />
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAppointment(selectedAppointment?.id)}
+                      className="flex h-14 items-center justify-center gap-3 rounded-2xl border-2 border-rose-100 text-xs font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 dark:border-rose-900/30 dark:hover:bg-rose-900/10 transition-all active:scale-95"
+                    >
+                      <FiTrash2 className="h-5 w-5" />
+                      Delete
+                    </button>
+                  </div>
+                  </div>
                 </div>
-              </div>
             </section>
           )}
 
@@ -647,12 +628,12 @@ function AppointmentsView() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-xl shadow-blue-500/40">
                 <LuSparkles className="h-5 w-5" />
               </div>
-              <p className="text-xs font-black uppercase tracking-[0.2em] italic">Forecaster Intelligence</p>
+              <p className="text-xs font-black uppercase tracking-[0.2em] italic">Clinic Insights</p>
             </div>
             <p className="text-sm leading-relaxed text-slate-600 dark:text-blue-300/80 font-bold italic">{aiForecast?.insight || "Analyzing clinic data for scheduling trends..."}</p>
             <button onClick={handleReviewHints} className="mt-5 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-blue-700 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
               <FiBell className="h-4 w-4" />
-              Access planning matrix
+              View Details
             </button>
           </section>
         </aside>

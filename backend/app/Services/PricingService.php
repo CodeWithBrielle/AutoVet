@@ -89,8 +89,19 @@ class PricingService
             return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
         }
 
-        if ($service->pricing_type === 'weight_based' && isset($pet) && $pet->weight !== null) {
-            $petWeight = (float) $pet->weight;
+        if ($service->pricing_type === 'weight_based') {
+            $effectiveWeight = $weight ?? ($pet ? $pet->weight : null);
+
+            if ($effectiveWeight === null) {
+                $petName = $pet ? $pet->name : "this pet";
+                throw new \Exception("Weight data is missing for {$petName}. Record clinical weight to resolve price.");
+            }
+
+            if (!$pet) {
+                 throw new \Exception("Pet profile data is required to resolve weight-based pricing.");
+            }
+
+            $petWeight = (float) $effectiveWeight;
             
             $range = \App\Models\WeightRange::where('status', 'Active')
                 ->where('species_id', $pet->species_id)
@@ -101,20 +112,21 @@ class PricingService
                 })
                 ->first();
 
-            if ($range && $range->size_category_id) {
-                $rule = $service->pricingRules()
-                    ->where('basis_type', 'size')
-                    ->where('reference_id', $range->size_category_id)
-                    ->first();
-                
-                if ($rule) {
-                    return (float) $rule->price * $quantity;
-                }
+            if (!$range) {
+                $speciesName = $pet->species->name ?? 'this species';
+                throw new \Exception("No weight bracket configured for {$speciesName} at {$petWeight} " . ($pet->weight_unit ?? 'kg') . ".");
             }
 
-            // Fallback to base fee if no specific range/rule found for weight-based service
-            // This prevents the entire invoice breakdown from failing.
-            return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
+            $rule = $service->pricingRules()
+                ->where('basis_type', 'weight')
+                ->where('reference_id', $range->id)
+                ->first();
+            
+            if (!$rule) {
+                throw new \Exception("Price not set for {$service->name} in the '{$range->label}' bracket.");
+            }
+
+            return (float) $rule->price * $quantity;
         }
 
         // Final fallback: Use professional_fee or legacy price
