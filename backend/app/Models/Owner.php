@@ -11,7 +11,7 @@ use App\Models\Notification;
 
 class Owner extends Model
 {
-    use SoftDeletes, HasSyncFields, Archivable, HasAuditTrail;
+    use SoftDeletes, HasSyncFields, Archivable, HasAuditTrail, \App\Traits\NormalizesData;
     
     protected $fillable = [
         'name', 'phone', 'email', 'address', 'city', 'province', 'zip',
@@ -23,6 +23,11 @@ class Owner extends Model
 
     protected static function booted()
     {
+        static::saving(function ($owner) {
+            $owner->phone = $owner->normalizePhone($owner->phone);
+            $owner->email = $owner->normalizeEmail($owner->email);
+        });
+
         static::created(function ($owner) {
             Notification::create([
                 'type' => 'OwnerRegistered',

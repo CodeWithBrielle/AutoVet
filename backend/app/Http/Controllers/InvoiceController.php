@@ -8,9 +8,12 @@ use App\Services\InvoiceFinalizationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use App\Traits\StandardizesResponses;
+use App\Traits\ValidatesContext;
 
 class InvoiceController extends Controller
 {
+    use StandardizesResponses, ValidatesContext;
     protected $pricingService;
     protected $finalizationService;
     protected $clientNotificationService;
@@ -59,7 +62,7 @@ class InvoiceController extends Controller
     public function index()
     {
         $invoices = Invoice::with('pet', 'items')->orderBy('created_at', 'desc')->get();
-        return response()->json($invoices);
+        return $this->successResponse($invoices);
     }
 
     /**
@@ -69,6 +72,7 @@ class InvoiceController extends Controller
     {
         $validated = $request->validate([
             'pet_id' => 'required|exists:pets,id',
+            'owner_id' => 'required|exists:owners,id',
             'appointment_id' => 'required|exists:appointments,id',
             'pet_weight' => 'nullable|numeric|min:0.01',
             'status' => 'required|in:Draft,Finalized,Paid,Partially Paid,Cancelled',
@@ -112,14 +116,29 @@ class InvoiceController extends Controller
             throw ValidationException::withMessages(['subtotal' => 'Cannot finalize an invoice with 0 subtotal.']);
         }
 
+        // Hierarchy Enforcement: Ensure Pet-Appointment-Owner chain is intact
+        if (!$this->isPetOwnedBy($validated['pet_id'], $validated['owner_id'])) {
+            return $this->errorResponse(
+                'HIERARCHY_MISMATCH',
+                'relationship',
+                'The selected pet does not belong to the selected owner.',
+                ['owner_id' => ['Validation mismatch: Pet/Owner linking is incorrect.']],
+                422
+            );
+        }
+
         if (!empty($validated['appointment_id'])) {
-            $appt = \App\Models\Appointment::find($validated['appointment_id']);
-            if ($appt && $appt->pet_id != $validated['pet_id']) {
-                throw ValidationException::withMessages([
-                    'pet_id' => 'The selected pet does not match the appointment record.',
-                    'appointment_id' => 'This appointment belongs to a different pet.'
-                ]);
+            if (!$this->isAppointmentForPet($validated['appointment_id'], $validated['pet_id'])) {
+                return $this->errorResponse(
+                    'HIERARCHY_MISMATCH',
+                    'relationship',
+                    'This appointment belongs to a different pet.',
+                    ['appointment_id' => ['Validation failed: Appointment/Pet linking mismatch.']],
+                    422
+                );
             }
+            
+            // Appointment-Owner check is implicit if isPetOwnedBy and isAppointmentForPet are true
         }
 
         DB::beginTransaction();
@@ -251,16 +270,14 @@ class InvoiceController extends Controller
                 try {
                     $owner = $invoice->pet->owner;
                     if ($owner) {
-                        $clinicName = \App\Models\Setting::where('key', 'clinic_name')->value('value') ?? 'Our Clinic';
                         $this->clientNotificationService->sendFromTemplate(
                             $owner,
-                            'invoice_finalized',
+                            'invoice_ready',
                             'email',
                             [
                                 'invoice_number' => $invoice->invoice_number,
                                 'total' => number_format($invoice->total, 2),
                                 'pet_name' => $invoice->pet->name ?? '',
-                                'clinic_name' => $clinicName,
                             ],
                             'automated',
                             $invoice
@@ -272,17 +289,15 @@ class InvoiceController extends Controller
             }
 
             DB::commit();
-            return response()->json($invoice->load('pet', 'items'), 201);
+
+            return $this->successResponse($invoice->load(['pet.owner', 'appointment', 'items']), 'Invoice created successfully.', 201);
         } catch (\Exception $e) {
             DB::rollBack();
             \Illuminate\Support\Facades\Log::error("Invoice creation failed: " . $e->getMessage(), [
                 'stack' => $e->getTraceAsString(),
                 'payload' => $request->all()
             ]);
-            return response()->json([
-                'message' => 'Failed to create invoice.', 
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse('SAVE_FAILED', 'billing', 'Failed to create invoice.', [$e->getMessage()], 500);
         }
     }
 
@@ -306,6 +321,7 @@ class InvoiceController extends Controller
         $validated = $request->validate([
             'status' => 'required|in:Draft,Finalized,Paid,Partially Paid,Cancelled',
             'pet_weight' => 'nullable|numeric|min:0.01',
+            'owner_id' => 'nullable|exists:owners,id',
             'appointment_id' => 'nullable|exists:appointments,id',
             'subtotal' => 'required|numeric|min:0',
             'discount_type' => 'required|in:percentage,fixed',
@@ -336,24 +352,46 @@ class InvoiceController extends Controller
             'items.*.parent_invoice_id' => 'nullable|string',
         ]);
 
-        if (!empty($validated['appointment_id'])) {
-            $appt = \App\Models\Appointment::find($validated['appointment_id']);
-            if ($appt && $appt->pet_id != $invoice->pet_id) {
-                throw ValidationException::withMessages([
-                    'appointment_id' => 'This appointment belongs to a different pet.'
-                ]);
+        if (!empty($validated['owner_id'])) {
+            if (!$this->isPetOwnedBy($invoice->pet_id, $validated['owner_id'])) {
+                return $this->errorResponse(
+                    'HIERARCHY_MISMATCH',
+                    'relationship',
+                    'The invoice pet does not belong to the provided owner.',
+                    ['owner_id' => ['Validation mismatch: Pet/Owner linking is incorrect.']],
+                    422
+                );
             }
         }
 
-        if ($invoice->status === 'Finalized' && in_array($validated['status'], ['Draft', 'Finalized'])) {
-             // If already finalized, only allow payment updates
-             $invoice->update([
-                 'amount_paid' => $validated['amount_paid'],
-                 'payment_method' => $validated['payment_method'] ?? $invoice->payment_method,
-                 'appointment_id' => $validated['appointment_id'] ?? $invoice->appointment_id,
-                 'status' => $validated['status']
-             ]);
-             return response()->json($invoice->load('pet', 'items'));
+        if (!empty($validated['appointment_id'])) {
+            if (!$this->isAppointmentForPet($validated['appointment_id'], $invoice->pet_id)) {
+                return $this->errorResponse(
+                    'HIERARCHY_MISMATCH',
+                    'relationship',
+                    'This appointment belongs to a different pet context.',
+                    ['appointment_id' => ['Validation failed: Appointment/Pet linking mismatch.']],
+                    422
+                );
+            }
+        }
+
+        // 1. Finalization & Cancellation Guard
+        if ($invoice->status === 'Finalized' || $invoice->status === 'Paid' || $invoice->status === 'Partially Paid') {
+            // If changing to Cancelled, we proceed but trigger reversal
+            if ($validated['status'] === 'Cancelled') {
+                // Keep moving to transaction block
+            } else {
+                // If already finalized, only allow status updates to Paid/Partially Paid and metadata updates. 
+                // NO ITEM EDITS ALLOWED.
+                $invoice->update([
+                    'amount_paid' => $validated['amount_paid'],
+                    'payment_method' => $validated['payment_method'] ?? $invoice->payment_method,
+                    'status' => $validated['status'],
+                    'notes_to_client' => $validated['notes_to_client'] ?? $invoice->notes_to_client,
+                ]);
+                return response()->json($invoice->load('pet', 'items'));
+            }
         }
 
         DB::beginTransaction();
@@ -491,22 +529,29 @@ class InvoiceController extends Controller
             }
 
             $invoice->load('items');
-            $this->finalizationService->finalizeInvoice($invoice);
+            
+            // 3. Finalization / Reversal Trigger
+            if ($invoice->status === 'Finalized' || $invoice->status === 'Paid') {
+                $this->finalizationService->finalizeInvoice($invoice);
+            } else if ($invoice->status === 'Cancelled') {
+                $this->finalizationService->reverseStockDeduction($invoice);
+            }
 
-            if ($invoice->wasChanged('status') && $invoice->status === 'Finalized') {
+            // 4. Decoupled side effects: Notifications happen outside the transaction
+            DB::commit();
+
+            if ($invoice->wasChanged('status') && in_array($invoice->status, ['Finalized', 'Paid'])) {
                 try {
                     $owner = $invoice->pet->owner;
                     if ($owner) {
-                        $clinicName = \App\Models\Setting::where('key', 'clinic_name')->value('value') ?? 'Our Clinic';
                         $this->clientNotificationService->sendFromTemplate(
                             $owner,
-                            'invoice_finalized',
+                            'invoice_ready',
                             'email',
                             [
                                 'invoice_number' => $invoice->invoice_number,
                                 'total' => number_format($invoice->total, 2),
                                 'pet_name' => $invoice->pet->name ?? '',
-                                'clinic_name' => $clinicName,
                             ],
                             'automated',
                             $invoice
@@ -517,11 +562,10 @@ class InvoiceController extends Controller
                 }
             }
 
-            DB::commit();
-            return response()->json($invoice->load('pet', 'items'));
+            return $this->successResponse($invoice->load(['pet.owner', 'appointment', 'items']), 'Invoice updated.');
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update invoice.', 'errors' => [$e->getMessage()]], 500);
+            return $this->errorResponse('UPDATE_FAILED', 'billing', 'Failed to update invoice.', [$e->getMessage()], 500);
         }
     }
 
@@ -530,6 +574,6 @@ class InvoiceController extends Controller
      */
     public function destroy(Invoice $invoice)
     {
-        return response()->json(['message' => 'Transactions cannot be deleted as per system policy.'], 403);
+        return $this->errorResponse('RESTRICTED_DELETION', 'policy', 'Transactions cannot be deleted as per system integrity policy. Use Cancellation instead.', [], 403);
     }
 }

@@ -1,0 +1,304 @@
+AUTOVET SYSTEM - FULL INVENTORY EXTRACT
+Date Generated: 2026-04-14 10:22:09
+================================================================================
+
+SUMMARY
+-------
+Total Items: 29
+Active Items: 28
+Archived Items: 1
+Out of Stock: 0
+
+DETAILED RECORDS
+----------------
+
+ID: 12 | Name: Nobivac DHPPi (MSD) – canine core combo vaccine [ACTIVE]
+SKU: VAC-NOBI-001 | Category: Vaccines
+Stock: 200 | Min Stock: 10
+Cost: 20.00 | Selling Price: 50.00
+Supplier: Other | Status: In Stock
+Expiry: 2028-08-16
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (200) -> New Stock: 200 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 13 | Name: Nobivac Rabies (MSD) – rabies vaccine [ACTIVE]
+SKU: VAC-NOBI-002 | Category: Vaccines
+Stock: 200 | Min Stock: 10
+Cost: 200.00 | Selling Price: 250.00
+Supplier: Other | Status: In Stock
+Expiry: 2030-08-15
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (200) -> New Stock: 200 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 14 | Name: Nobivac L4 (MSD) – leptospirosis vaccine [ACTIVE]
+SKU: VAC-NOBI-003 | Category: Vaccines
+Stock: 200 | Min Stock: 20
+Cost: 250.00 | Selling Price: 300.00
+Supplier: Other | Status: In Stock
+Expiry: 2028-11-23
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (200) -> New Stock: 200 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 15 | Name: Nobivac KC (MSD) – kennel cough (intranasal) [ACTIVE]
+SKU: VAC-NOBI-004 | Category: Vaccines
+Stock: 100 | Min Stock: 10
+Cost: 300.00 | Selling Price: 350.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-07-26
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 16 | Name: Nobivac Tricat Trio (MSD) – feline core vaccine [ACTIVE]
+SKU: VAC-NOBI-005 | Category: Vaccines
+Stock: 100 | Min Stock: 10
+Cost: 250.00 | Selling Price: 300.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-11-21
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 17 | Name: Synulox palatable tablets (Zoetis) – amoxicillin/clavulanic acid [ACTIVE]
+SKU: MED-SYNU-001 | Category: Medicines
+Stock: 100 | Min Stock: 10
+Cost: 45.00 | Selling Price: 90.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-06-20
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 18 | Name: Cerenia 16 mg tablets (maropitant) [ACTIVE]
+SKU: MED-CERE-001 | Category: Medicines
+Stock: 100 | Min Stock: 10
+Cost: 150.00 | Selling Price: 200.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-08-17
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 19 | Name: Metacam 1.5 mg/ml oral suspension (meloxicam) [ACTIVE]
+SKU: MED-META-001 | Category: Medicines
+Stock: 100 | Min Stock: 10
+Cost: 900.00 | Selling Price: 900.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-08-22
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 22 | Name: Zoletil (Virbac) – injectable anesthetic [ACTIVE]
+SKU: MED-ZOLE-001 | Category: Medicines
+Stock: 100 | Min Stock: 10
+Cost: 500.00 | Selling Price: 550.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-07-26
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 23 | Name: NexGard Spectra [ARCHIVED on 2026-04-09 11:15:10 by Dr. Jake S. Medina]
+SKU: MED-NEXG-001 | Category: Medicines
+Stock: 100 | Min Stock: 10
+Cost: 250.00 | Selling Price: 500.00
+Supplier: Other | Status: In Stock
+Expiry: 2026-04-08
+Usage: Sellable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 24 | Name: Syringe 1 mL (sterile) [ACTIVE]
+SKU: CON-SYRI-001 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 10.00 | Selling Price: 5.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-08-15
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 25 | Name: Syringe 3 mL (sterile) [ACTIVE]
+SKU: CON-SYRI-002 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 15.00 | Selling Price: 6.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-07-25
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 26 | Name: Needle 23G / 25G (sterile) [ACTIVE]
+SKU: CON-NEED-001 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 20.00 | Selling Price: 10.00
+Supplier: Other | Status: In Stock
+Expiry: 2028-07-08
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 27 | Name: IV catheter (22G / 24G) [ACTIVE]
+SKU: CON-IVCA-001 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 0.00 | Selling Price: 50.00
+Supplier: Other | Status: In Stock
+Expiry: None
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 28 | Name: Disposable gloves (box, 100 pcs) [ACTIVE]
+SKU: CON-DISP-001 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 0.00 | Selling Price: 250.00
+Supplier: Other | Status: In Stock
+Expiry: None
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 29 | Name: Gauze pads (sterile packs) [ACTIVE]
+SKU: CON-GAUZ-001 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 150.00 | Selling Price: 5.00
+Supplier: Other | Status: In Stock
+Expiry: 2028-06-13
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 30 | Name: Cotton balls / cotton rolls [ACTIVE]
+SKU: CON-COTT-001 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 5.00 | Selling Price: 120.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-11-08
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 31 | Name: 70% alcohol (500 mL – 1L) [ACTIVE]
+SKU: CON-70AL-001 | Category: Required Items
+Stock: 100 | Min Stock: 10
+Cost: 0.00 | Selling Price: 180.00
+Supplier: Other | Status: In Stock
+Expiry: 2030-12-25
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-08: Stock In (100) -> New Stock: 100 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 32 | Name: VetClean Anti-Tick & Flea Dog Shampoo 250ml [ACTIVE]
+SKU: GEN-VETC-001 | Category: Grooming Supplies
+Stock: 20 | Min Stock: 10
+Cost: 200.00 | Selling Price: 350.00
+Supplier: Other | Status: In Stock
+Expiry: 2030-07-25
+Usage: Sellable, Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 33 | Name: PetDerm Sensitive Skin Cat Shampoo 200ml [ACTIVE]
+SKU: GEN-PETD-001 | Category: Grooming Supplies
+Stock: 20 | Min Stock: 10
+Cost: 180.00 | Selling Price: 320.00
+Supplier: Other | Status: In Stock
+Expiry: 2030-06-09
+Usage: Sellable, Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 34 | Name: FungiCare Medicated Antifungal Shampoo 250ml [ACTIVE]
+SKU: GEN-FUNG-001 | Category: Grooming Supplies
+Stock: 20 | Min Stock: 10
+Cost: 280.00 | Selling Price: 450.00
+Supplier: Other | Status: In Stock
+Expiry: None
+Usage: Sellable, Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 35 | Name: CoatSoft Pet Conditioner 200ml [ACTIVE]
+SKU: GEN-COAT-001 | Category: Grooming Supplies
+Stock: 20 | Min Stock: 10
+Cost: 170.00 | Selling Price: 300.00
+Supplier: Other | Status: In Stock
+Expiry: 2029-06-14
+Usage: Sellable, Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 36 | Name: FeshPaws Grooming Cologne (Baby Powder) 100ml [ACTIVE]
+SKU: GEN-FESH-001 | Category: Grooming Supplies
+Stock: 20 | Min Stock: 10
+Cost: 120.00 | Selling Price: 200.00
+Supplier: Other | Status: In Stock
+Expiry: 2031-06-11
+Usage: Sellable, Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 37 | Name: KnotFree Detangling Spray 150ml [ACTIVE]
+SKU: GEN-KNOT-001 | Category: Grooming Supplies
+Stock: 20 | Min Stock: 10
+Cost: 160.00 | Selling Price: 280.00
+Supplier: Other | Status: In Stock
+Expiry: None
+Usage: Sellable, Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 38 | Name: Rabigen Anti-Rabies Vaccine 1ml (Canine/Feline) [ACTIVE]
+SKU: VAC-RABI-001 | Category: Vaccines
+Stock: 20 | Min Stock: 10
+Cost: 250.00 | Selling Price: 300.00
+Supplier: Other | Status: In Stock
+Expiry: 2030-07-17
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 39 | Name: Vanguard Plus 5-in-1 Vaccine for Dogs 1 Dose [ACTIVE]
+SKU: VAC-VANG-001 | Category: Vaccines
+Stock: 20 | Min Stock: 10
+Cost: 600.00 | Selling Price: 650.00
+Supplier: Other | Status: In Stock
+Expiry: 2031-10-09
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 40 | Name: Vanguard Plus 6-in-1 Vaccine for Dogs 1 Dose [ACTIVE]
+SKU: VAC-VANG-002 | Category: Vaccines
+Stock: 20 | Min Stock: 10
+Cost: 700.00 | Selling Price: 800.00
+Supplier: Other | Status: In Stock
+Expiry: 2031-06-09
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 41 | Name: Felocell 4-in-1 Vaccine for Cats 1 Dose [ACTIVE]
+SKU: VAC-FELO-001 | Category: Vaccines
+Stock: 20 | Min Stock: 10
+Cost: 550.00 | Selling Price: 650.00
+Supplier: Other | Status: In Stock
+Expiry: 2031-02-25
+Usage: Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------
+ID: 42 | Name: Drontal [ACTIVE]
+SKU: GEN-DRON-001 | Category: Preventive Care Supplies
+Stock: 20 | Min Stock: 10
+Cost: 50.00 | Selling Price: 100.00
+Supplier: Other | Status: In Stock
+Expiry: 2030-10-16
+Usage: Sellable, Service Usable, Auto-Deduct
+Recent Activity:
+  - 2026-04-09: Stock In (20) -> New Stock: 20 | Initial Stock
+--------------------------------------------------------------------------------

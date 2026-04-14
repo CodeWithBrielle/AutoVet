@@ -76,6 +76,38 @@ export default function ClientNotificationHistory() {
         toast.success('Message copied to clipboard');
     };
 
+    const handleRetry = async (notification) => {
+        try {
+            setLoading(true);
+            const response = await fetch(`/api/client-notifications/${notification.id}/retry`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${user?.token}`
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.message || 'Retry failed');
+            }
+            
+            toast.success(`Retry successful! Status: ${data.status}`);
+            fetchHistory(); // Refresh the list
+            
+            // Update selected notification in drawer if open
+            if (selectedNotification?.id === notification.id) {
+                setSelectedNotification(data);
+            }
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
         <div className="card-shell p-8 shadow-soft-xl border border-slate-100 dark:border-zinc-800">
             <div className="flex flex-wrap justify-between items-end mb-8 gap-6">
@@ -148,8 +180,9 @@ export default function ClientNotificationHistory() {
                                     </td>
                                     <td className="p-5 align-top">
                                         <div className="font-black text-slate-800 dark:text-zinc-100 italic">{item.owner?.name || 'Unknown'}</div>
-                                        <div className="text-[10px] font-black text-slate-400 dark:text-zinc-500 flex gap-2 mt-1 uppercase tracking-widest items-center">
-                                            {item.channel}
+                                        <div className="text-[10px] font-black text-slate-400 dark:text-zinc-500 flex flex-col gap-0.5 mt-1 uppercase tracking-widest">
+                                            <span>{item.channel} • {item.channel === 'email' ? item.recipient_email : item.recipient_phone}</span>
+                                            {item.attempts > 1 && <span className="text-blue-500 font-black italic">Attempt {item.attempts}/{item.max_attempts}</span>}
                                         </div>
                                     </td>
                                     <td className="p-5 align-top max-w-md">
@@ -255,14 +288,27 @@ export default function ClientNotificationHistory() {
                             <>
                                 {/* Status Alert */}
                                 {selectedNotification.status === 'failed' && (
-                                    <div className="flex items-start gap-4 p-5 rounded-3xl bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-900/10 dark:border-rose-900/30 dark:text-rose-400">
-                                        <div className="mt-1 h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-2xl bg-white dark:bg-rose-900/30 shadow-sm">
-                                            <FiAlertCircle size={22} />
+                                    <div className="flex flex-col gap-4 p-5 rounded-3xl bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-900/10 dark:border-rose-900/30 dark:text-rose-400">
+                                        <div className="flex items-start gap-4">
+                                            <div className="mt-1 h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-2xl bg-white dark:bg-rose-900/30 shadow-sm">
+                                                <FiAlertCircle size={22} />
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="text-sm font-black uppercase tracking-widest mb-1 italic">Delivery Failed</div>
+                                                <div className="text-xs font-bold leading-relaxed">{selectedNotification.error_message}</div>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <div className="text-sm font-black uppercase tracking-widest mb-1 italic">Delivery Failed</div>
-                                            <div className="text-xs font-bold leading-relaxed">{selectedNotification.error_message}</div>
-                                        </div>
+                                        
+                                        {selectedNotification.attempts < selectedNotification.max_attempts && (
+                                            <button 
+                                                onClick={() => handleRetry(selectedNotification)}
+                                                disabled={loading}
+                                                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-rose-600 text-white text-xs font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                                            >
+                                                <FiRefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                                                Retry Delivery (Attempt {selectedNotification.attempts + 1} of {selectedNotification.max_attempts})
+                                            </button>
+                                        )}
                                     </div>
                                 )}
 

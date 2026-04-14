@@ -8,7 +8,8 @@ import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import PhoneInput from "../common/PhoneInput";
 import { FiChevronDown } from "react-icons/fi";
-import { PHILIPPINE_CITIES } from "../../constants/locations";
+import ValidationSummary from "../common/ValidationSummary";
+import SmartAddressGroup from "../common/SmartAddressGroup";
 
 const inputBase =
     "h-11 w-full rounded-xl border bg-slate-50 px-3 text-sm text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none dark:bg-dark-surface dark:text-zinc-200 dark:placeholder:text-gray-500 dark:focus:bg-gray-800";
@@ -123,6 +124,8 @@ function EditOwnerModal({ isOpen, onClose, owner, onSaveSuccess }) {
                     )}
 
                     <form id="edit-owner-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                        {Object.keys(errors).length > 0 && <ValidationSummary errors={errors} />}
+                        
                         <div>
                             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Full Name *</label>
                             <input {...register("name")} className={getInputClass(errors.name)} placeholder="e.g. Maria Clara" />
@@ -146,46 +149,13 @@ function EditOwnerModal({ isOpen, onClose, owner, onSaveSuccess }) {
                             </div>
                         </div>
 
-                        <div>
-                            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Street Address</label>
-                            <input {...register("address")} className={getInputClass(errors.address)} placeholder="123 Street..." />
-                            {errors.address && <p className="mt-1 text-xs text-red-500">{errors.address.message}</p>}
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div className="sm:col-span-1">
-                                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">City</label>
-                                <div className="relative">
-                                    <select 
-                                        {...register("city")} 
-                                        className={clsx(inputBase, errors.city ? "border-red-400 focus:border-red-500" : "border-slate-200 focus:border-blue-300 dark:border-dark-border")}
-                                        onChange={(e) => {
-                                            const city = e.target.value;
-                                            setValue("city", city);
-                                            const data = PHILIPPINE_CITIES[city];
-                                            if (data) {
-                                                setValue("province", data.province);
-                                                setValue("zip", data.zip);
-                                            }
-                                        }}
-                                    >
-                                        <option value="">Select City...</option>
-                                        {Object.keys(PHILIPPINE_CITIES).sort().map(city => (
-                                            <option key={city} value={city}>{city}</option>
-                                        ))}
-                                    </select>
-                                    <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-                                </div>
-                            </div>
-                            <div className="sm:col-span-1">
-                                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Province</label>
-                                <input {...register("province")} className={clsx(inputBase, "bg-slate-100 dark:bg-dark-surface/50 border-slate-200 dark:border-dark-border")} placeholder="Province" readOnly />
-                            </div>
-                            <div className="sm:col-span-1">
-                                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Zip</label>
-                                <input {...register("zip")} className={clsx(inputBase, "bg-slate-100 dark:bg-dark-surface/50 border-slate-200 dark:border-dark-border")} placeholder="Zip" readOnly />
-                            </div>
-                        </div>
+                        <SmartAddressGroup
+                            register={register}
+                            errors={errors}
+                            watch={watch}
+                            setValue={setValue}
+                            prefix=""
+                        />
                     </form>
                 </div>
 

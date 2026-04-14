@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { normalizeApiResponse } from "../../utils/apiResponseNormalizer";
 import { useLocation } from "react-router-dom";
 import clsx from "clsx";
 import {
@@ -28,6 +29,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../utils/api";
 import ManualSendModal from "../notifications/ManualSendModal";
+import SearchableSelect from "../common/SearchableSelect";
+import ValidationSummary from "../common/ValidationSummary";
 
 const viewModes = ["Month", "Week", "Day"];
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -39,6 +42,7 @@ const quickAddSchema = z.object({
     message: "Appointment date cannot be in the past"
   }),
   time: z.string().min(1, "Time is required").regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Invalid time format (HH:mm)"),
+  owner_id: z.string().min(1, "Please select an owner"),
   pet_id: z.string().min(1, "Please select a pet"),
   service_id: z.string().min(1, "Please select a service"),
   vet_id: z.string().min(1, "Please select a veterinarian"),
@@ -76,6 +80,7 @@ function AppointmentsView() {
     defaultValues: {
       date: "",
       time: "",
+      owner_id: "",
       pet_id: preSelectedPetId || "",
       service_id: "",
       vet_id: "",
@@ -98,66 +103,76 @@ function AppointmentsView() {
   const [vets, setVets] = useState([]);
   const [selectedOwnerId, setSelectedOwnerId] = useState("");
 
-  const fetchAppointments = () => {
+  const fetchAppointments = useCallback(() => {
     if (!user?.token) return;
     api.get("/api/appointments")
       .then((res) => {
-        const data = res.data;
-        if (Array.isArray(data)) {
-          setAppointments(data);
-        } else if (data && typeof data === "object" && Array.isArray(data.appointments)) {
-          setAppointments(data.appointments);
-        } else {
-          setAppointments([]);
-        }
+        const data = normalizeApiResponse(res);
+        setAppointments(data);
       })
       .catch((err) => {
         console.error("Error fetching appointments:", err);
         setAppointments([]);
       });
-  };
+  }, [user?.token]);
 
   useEffect(() => {
     let isMounted = true;
     if (!user?.token) return;
 
     Promise.all([
-      api.get("/api/appointments").catch(() => ({ data: [] })),
-      api.get("/api/owners").catch(() => ({ data: [] })),
-      api.get("/api/pets").catch(() => ({ data: [] })),
-      api.get("/api/services").catch(() => ({ data: [] })),
-      api.get("/api/vets").catch(() => ({ data: [] })),
-      api.get("/api/settings").catch(() => ({ data: {} })),
-      api.get("/api/dashboard/appointment-forecast").catch(() => ({ data: null }))
+      api.get("/api/appointments"),
+      api.get("/api/owners"),
+      api.get("/api/pets"),
+      api.get("/api/services"),
+      api.get("/api/vets"),
+      api.get("/api/settings"),
+      api.get("/api/dashboard/appointment-forecast")
     ]).then(([apptRes, ownersRes, petsRes, servicesRes, vetsRes, settingsRes, forecastRes]) => {
       if (!isMounted) return;
 
-      const apptData = apptRes.data;
-      if (Array.isArray(apptData)) {
-        setAppointments(apptData);
-      } else if (apptData && Array.isArray(apptData.appointments)) {
-        setAppointments(apptData.appointments);
-      } else {
-        setAppointments([]);
+      // Use the normalization utility to handle both standardized and legacy formats
+      const apptData = normalizeApiResponse(apptRes);
+      const ownersData = normalizeApiResponse(ownersRes);
+      const petsData = normalizeApiResponse(petsRes);
+      const servicesData = normalizeApiResponse(servicesRes);
+      const vetsData = normalizeApiResponse(vetsRes);
+
+      setAppointments(apptData);
+      setOwners(ownersData);
+      setPets(petsData);
+      setServices(servicesData);
+      setVets(vetsData);
+
+      // If pre-selected pet, try to find the owner
+      if (preSelectedPetId) {
+        const foundPet = petsData.find(p => p.id.toString() === preSelectedPetId.toString());
+        if (foundPet) {
+          setSelectedOwnerId(foundPet.owner_id.toString());
+          setValue("owner_id", foundPet.owner_id.toString());
+        }
       }
 
-      setOwners(Array.isArray(ownersRes.data) ? ownersRes.data : []);
-      setPets(Array.isArray(petsRes.data) ? petsRes.data : []);
-      setServices(Array.isArray(servicesRes.data) ? servicesRes.data : []);
-      setVets(Array.isArray(vetsRes.data) ? vetsRes.data : []);
-
-      const settingsData = settingsRes.data;
+      const settingsData = settingsRes.data || {};
       const inv = settingsData.inventory_categories ? JSON.parse(settingsData.inventory_categories) : [];
       const svc = settingsData.service_categories ? JSON.parse(settingsData.service_categories) : [];
       setCategories([...new Set([...inv, ...svc])]);
 
       if (forecastRes.data) setAiForecast(forecastRes.data);
+    }).catch(err => {
+      console.error("[AppointmentsView] Error loading data:", err);
+      if (isMounted) {
+        // Fallback to empty states if any critical request fails
+        setAppointments([]);
+        setOwners([]);
+        setPets([]);
+      }
     });
 
     return () => {
       isMounted = false;
     };
-  }, [user?.token]);
+  }, [user?.token, preSelectedPetId, setValue]);
 
   const handleReviewHints = () => {
     if (aiForecast) {
@@ -178,6 +193,7 @@ function AppointmentsView() {
   const onSubmit = async (data) => {
     try {
       const payload = { ...data };
+      if (payload.owner_id) payload.owner_id = Number(payload.owner_id);
       if (payload.pet_id) payload.pet_id = Number(payload.pet_id);
       if (payload.service_id) payload.service_id = Number(payload.service_id);
       if (payload.vet_id) payload.vet_id = Number(payload.vet_id);
@@ -413,28 +429,56 @@ function AppointmentsView() {
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                {Object.keys(errors).length > 0 && (
+                  <ValidationSummary errors={errors} />
+                )}
                 <div className="space-y-5 rounded-[2rem] border-2 border-slate-100 bg-slate-50/30 p-8 dark:border-dark-border dark:bg-dark-surface/30">
                   <div>
                     <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Client / Owner Record</label>
-                    <div className="relative">
-                      <select value={selectedOwnerId} onChange={(e) => { setSelectedOwnerId(e.target.value); setValue("pet_id", ""); }} className={clsx(getQInputClass(false), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
-                        <option value="">— Select Owner —</option>
-                        {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                      </select>
-                      <FiChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    </div>
+                    <SearchableSelect 
+                      options={owners.map(o => ({
+                        value: o.id.toString(),
+                        label: o.name,
+                        sublabel: o.phone || o.email || "No contact info"
+                      }))}
+                      value={watch("owner_id")}
+                      onChange={(id) => {
+                        setValue("owner_id", id, { shouldValidate: true });
+                        setSelectedOwnerId(id);
+                        setValue("pet_id", "");
+                      }}
+                      placeholder="Search owner..."
+                      error={errors.owner_id?.message}
+                    />
                   </div>
 
                   <div>
                     <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Patient / Pet Identification *</label>
-                    <div className="relative">
-                      <select {...register("pet_id")} disabled={!selectedOwnerId} className={clsx(getQInputClass(errors.pet_id), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
-                        <option value="">— Select Pet —</option>
-                        {pets.filter(p => p.owner_id.toString() === selectedOwnerId.toString()).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.species?.name})</option>)}
-                      </select>
-                      <FiChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    </div>
-                    {errors.pet_id && <p className="mt-2 text-xs text-red-500 font-black italic">{errors.pet_id.message}</p>}
+                    {(() => {
+                      const filteredPets = pets.filter(p => p.owner_id?.toString() === selectedOwnerId?.toString());
+                      const hasPets = filteredPets.length > 0;
+                      
+                      return (
+                        <SearchableSelect 
+                          options={filteredPets.map(p => ({
+                            value: p.id.toString(),
+                            label: p.name,
+                            sublabel: p.species?.name || "Unknown species"
+                          }))}
+                          value={watch("pet_id")}
+                          onChange={(id) => setValue("pet_id", id, { shouldValidate: true })}
+                          placeholder={
+                            !selectedOwnerId 
+                              ? "Select owner first" 
+                              : hasPets 
+                                ? `Search pet (${filteredPets.length} available)...` 
+                                : "No pets registered for this owner"
+                          }
+                          disabled={!selectedOwnerId || !hasPets}
+                          error={errors.pet_id?.message}
+                        />
+                      );
+                    })()}
                   </div>
 
                   <div>

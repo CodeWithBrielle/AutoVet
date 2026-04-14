@@ -132,4 +132,19 @@ class ClientNotificationController extends Controller
 
         return $variables;
     }
+
+    /**
+     * Retry a failed notification.
+     */
+    public function retry(ClientNotification $notification)
+    {
+        try {
+            $updated = $this->service->retry($notification);
+            return response()->json($updated);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Retry failed: ' . $e->getMessage()
+            ], 422);
+        }
+    }
 }

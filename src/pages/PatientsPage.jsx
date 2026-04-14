@@ -60,7 +60,8 @@ function PatientsPage() {
       toast.success("Owner archived successfully.");
     } catch (err) {
       console.error("Failed to delete owner:", err);
-      toast.error("Could not delete the owner.");
+      const errorMessage = err.response?.data?.message || "Could not delete the owner.";
+      toast.error(errorMessage);
     }
   };
 

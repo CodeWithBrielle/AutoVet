@@ -333,24 +333,39 @@ export default function ViewInventoryModal({ isOpen, onClose, product, onDeleteR
               {/* AI Insight Sub-section */}
               <section className="rounded-3xl bg-blue-600 p-8 text-white shadow-2xl shadow-blue-500/20">
                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-xs font-black uppercase tracking-widest text-blue-100">Predictive Stock Analysis</h4>
-                    <LuSparkles className="h-5 w-5 text-blue-200 animate-pulse" />
+                    <h4 className="text-xs font-black uppercase tracking-widest text-blue-100">
+                      {aiForecastData?.label_mode === 'overview' ? 'Stock Overview' : 'Predictive Stock Analysis'}
+                    </h4>
+                    {aiForecastData?.label_mode !== 'overview' && (
+                        <LuSparkles className="h-5 w-5 text-blue-200 animate-pulse" />
+                    )}
                  </div>
                  {aiForecastData ? (
                    <div className="space-y-4">
-                      {aiForecastData.error ? (
-                        <p className="text-sm font-bold text-blue-100 italic">{aiForecastData.error}</p>
+                      {aiForecastData.success === false || aiForecastData.error ? (
+                        <p className="text-sm font-bold text-blue-100 italic">{aiForecastData.error || "Failed to parse data"}</p>
                       ) : (
-                        <div className="grid grid-cols-2 gap-4">
-                           <div className="p-4 bg-white/10 rounded-2xl">
-                              <p className="text-[10px] font-black uppercase text-blue-200">Critical Stockout</p>
-                              <p className="text-lg font-bold">{aiForecastData.predicted_stockout_date || "Stable"}</p>
-                           </div>
-                           <div className="p-4 bg-white/10 rounded-2xl">
-                              <p className="text-[10px] font-black uppercase text-blue-200">Recommendation</p>
-                              <p className="text-lg font-bold">Buy +{aiForecastData.recommended_stock || 0}</p>
-                           </div>
-                        </div>
+                        <>
+                            <div className="grid grid-cols-2 gap-4">
+                               <div className="p-4 bg-white/10 rounded-2xl">
+                                  <p className="text-[10px] font-black uppercase text-blue-200">Critical Stockout</p>
+                                  <p className="text-lg font-bold">{aiForecastData.data?.predicted_stockout_date || "Stable"}</p>
+                               </div>
+                               <div className="p-4 bg-white/10 rounded-2xl">
+                                  <p className="text-[10px] font-black uppercase text-blue-200">Recommendation</p>
+                                  <p className="text-lg font-bold">Buy +{aiForecastData.data?.recommended_stock || 0}</p>
+                               </div>
+                            </div>
+                            
+                            {aiForecastData.confidence_note && (
+                               <div className="mt-4 pt-4 border-t border-blue-500/30">
+                                   <p className="text-[9px] font-bold text-blue-200 uppercase tracking-widest flex items-start gap-1">
+                                       <FiShield className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                       Defense Note: {aiForecastData.confidence_note}
+                                   </p>
+                               </div>
+                            )}
+                        </>
                       )}
                    </div>
                  ) : (

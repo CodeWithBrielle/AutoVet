@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import {
   FiCalendar,
@@ -11,6 +12,7 @@ import {
   FiSend,
   FiBell,
   FiXCircle,
+  FiAlertCircle,
 } from "react-icons/fi";
 import { LuPawPrint } from "react-icons/lu";
 import { useToast } from "../../context/ToastContext";
@@ -19,9 +21,11 @@ import { useFormErrors } from "../../hooks/useFormErrors";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import api from "../../utils/api";
 import PrintableInvoice from "./PrintableInvoice";
 import ManualSendModal from "../notifications/ManualSendModal";
-import api from "../../utils/api";
+import SearchableSelect from "../common/SearchableSelect";
+
 
 const currency = (value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value || 0);
 const pdfCurrency = (value) => "P " + (value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -64,6 +68,8 @@ async function generateInvoicePDF(element, filename = 'invoice.pdf') {
 
 function InvoiceModuleView() {
   const toast = useToast();
+  const [searchParams] = useSearchParams();
+  const urlPetId = searchParams.get("petId") || searchParams.get("patientId");
   const { user } = useAuth();
   const { setLaravelErrors, clearErrors, getError } = useFormErrors();
   const [items, setItems] = useState([]);
@@ -75,7 +81,7 @@ function InvoiceModuleView() {
   const [pets, setPets] = useState([]);
   const [selectedOwnerId, setSelectedOwnerId] = useState("");
 
-  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedPetId, setSelectedPetId] = useState("");
 
   // New state for appointments and selected appointment
   const [appointments, setAppointments] = useState([]);
@@ -114,25 +120,48 @@ function InvoiceModuleView() {
       api.get("/api/inventory").then(res => res.data).catch(() => [])
     ])
       .then(([ownersData, petsData, settingsData, servicesData, inventoryData]) => {
-        // Robustness: Only set array state if data is an array, else log payload
-        if (!Array.isArray(ownersData)) {
+        const normalize = (d) => Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : []);
+        
+        const ownersArray = normalize(ownersData);
+        if (ownersArray.length === 0 && !Array.isArray(ownersData) && !Array.isArray(ownersData?.data)) {
           console.error("Unexpected owners API response:", ownersData);
-          setOwners([]);
-        } else {
-          setOwners(ownersData);
         }
+        setOwners(ownersArray);
 
-        if (!Array.isArray(petsData)) {
+        const petsArray = normalize(petsData);
+        if (petsArray.length === 0 && !Array.isArray(petsData) && !Array.isArray(petsData?.data)) {
           console.error("Unexpected pets API response:", petsData);
-          setPets([]);
-        } else {
-          setPets(petsData);
         }
+        setPets(petsArray);
 
-        setNotes(settingsData?.invoice_notes_template || "");
-        setClinicSettings(settingsData);
-        setServices(Array.isArray(servicesData) ? servicesData : []);
-        setInventory(Array.isArray(inventoryData) ? inventoryData : []);
+        setNotes(settingsData?.data?.invoice_notes_template || settingsData?.invoice_notes_template || "");
+        setClinicSettings(settingsData?.data || settingsData);
+        setServices(normalize(servicesData));
+        setInventory(normalize(inventoryData));
+
+        // URL Context Logic: If petId is present, auto-load context
+        if (urlPetId) {
+          const patient = petsArray.find(p => p.id.toString() === urlPetId);
+          if (patient) {
+            setSelectedOwnerId(patient.owner_id?.toString() || "");
+            setSelectedPetId(patient.id.toString());
+            setPatientDetails(patient);
+            setCurrentWeight(patient.weight || "");
+
+            // Fetch appointments for this specific pet immediately
+            api.get(`/api/appointments?pet_id=${patient.id}`, { headers })
+              .then(res => setAppointments(Array.isArray(res.data) ? res.data : []));
+            
+            // Apply template if settings exist
+            if (settingsData?.invoice_notes_template) {
+              let template = settingsData.invoice_notes_template
+                .replace(/{clinic_name}/g, settingsData.clinic_name || "")
+                .replace(/{pet_name}/g, patient.name || "")
+                .replace(/{owner_name}/g, patient.owner?.name || "");
+              setNotes(template);
+            }
+          }
+        }
       })
       .catch((err) => {
         console.error("Critical fail in Invoice initialization:", err);
@@ -163,7 +192,7 @@ function InvoiceModuleView() {
 
   const handlePatientSelect = (e) => {
     const pId = e.target.value;
-    setSelectedPatientId(pId);
+    setSelectedPetId(pId);
     setSelectedAppointmentId(""); // reset appointment selection
     setItems([]); // Clear previous patient's items
     if (processedApptsRef.current) processedApptsRef.current.clear();
@@ -193,7 +222,7 @@ function InvoiceModuleView() {
       });
 
     // Auto replace placeholders in the notes if clinic template is present
-    if (clinicSettings && clinicSettings.invoice_notes_template) {
+    if (clinicSettings && clinicSettings.invoice_notes_template && patientData) {
       let template = clinicSettings.invoice_notes_template;
       template = template.replace(/{clinic_name}/g, clinicSettings.clinic_name || "");
       template = template.replace(/{pet_name}/g, patientData.name || "");
@@ -332,7 +361,7 @@ function InvoiceModuleView() {
     if (item.type === 'service') {
       try {
         setPricingError(null);
-        const res = await api.get(`/api/invoices/resolve-breakdown?service_id=${item.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`);
+        const res = await api.get(`/api/invoices/resolve-breakdown?service_id=${item.id}&pet_id=${selectedPetId}&qty=${qtyInput}&weight=${currentWeight}`);
         const breakdown = res.data;
         setPriceInput(breakdown.professional_fee);
       } catch (e) {
@@ -462,7 +491,7 @@ function InvoiceModuleView() {
     if (itemType === 'service' && selectedService) {
       // If we have a selected service, we should use the breakdown to add linked items
       try {
-        const res = await api.get(`/api/invoices/resolve-breakdown?service_id=${selectedService.id}&pet_id=${selectedPatientId}&qty=${qtyInput}&weight=${currentWeight}`);
+        const res = await api.get(`/api/invoices/resolve-breakdown?service_id=${selectedService.id}&pet_id=${selectedPetId}&qty=${qtyInput}&weight=${currentWeight}`);
         const breakdown = res.data;
         addServiceLineItems(itemName, breakdown, selectedService);
         // Reset inputs and return
@@ -541,7 +570,7 @@ function InvoiceModuleView() {
     if (processedApptsRef.current) processedApptsRef.current.clear();
     setDiscountVal(0);
     setNotes(clinicSettings ? clinicSettings.invoice_notes_template || "" : "");
-    setSelectedPatientId("");
+    setSelectedPetId("");
     setPatientDetails(null);
     setStatus("Draft");
     setAmountPaid(0);
@@ -554,7 +583,7 @@ function InvoiceModuleView() {
       toast.error("Cannot save an invoice without items.");
       return;
     }
-    if (!selectedPatientId) {
+    if (!selectedPetId) {
       toast.error("Please select a patient.");
       return;
     }
@@ -570,7 +599,8 @@ function InvoiceModuleView() {
     }
 
     const payload = {
-      pet_id: selectedPatientId,
+      pet_id: selectedPetId,
+      owner_id: selectedOwnerId,
       appointment_id: selectedAppointmentId || null,
       pet_weight: currentWeight || null,
       status: actualStatus,
@@ -607,7 +637,11 @@ function InvoiceModuleView() {
       }))
     };
     if (!selectedAppointmentId) {
-      toast.error("Please select an appointment for this invoice.");
+      toast.error("Please select an appointment for this invoice. Clinical accountability requires a linked visit.");
+      return;
+    }
+    if (!selectedOwnerId) {
+      toast.error("Owner context is missing.");
       return;
     }
 
@@ -635,6 +669,26 @@ function InvoiceModuleView() {
     }
   };
 
+  const cancelInvoice = async () => {
+    if (!window.confirm("Are you sure you want to cancel this invoice? This will REVERSE stock deductions and mark the record as read-only Cancelled. This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      const response = await api.put(`/api/invoices/${selectedAppointmentId || "current"}`, {
+        status: "Cancelled",
+        pet_id: selectedPetId,
+        owner_id: selectedOwnerId,
+        items: items // required for backend validation even if not changed
+      });
+      
+      setStatus("Cancelled");
+      toast.success("Invoice cancelled and stock restored.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to cancel invoice.");
+    }
+  };
+
   return (
     <div className="card-shell overflow-hidden p-0">
       <div className={clsx(
@@ -655,35 +709,31 @@ function InvoiceModuleView() {
 
             <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-6">
               <section>
-                <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-400">Patient Details</h3>
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-400">Client & Pet</h3>
                 <div className="space-y-3">
                   <div className="relative">
-                    <FiSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-zinc-500" />
-                    <select
+                    <SearchableSelect 
+                      options={owners.map(o => ({
+                        value: o.id.toString(),
+                        label: o.name,
+                        sublabel: o.phone || o.email || "No contact info"
+                      }))}
                       value={selectedOwnerId}
-                      onChange={(e) => {
-                        setSelectedOwnerId(e.target.value);
-                        setSelectedPatientId(""); // reset pet
-                        setSelectedAppointmentId(""); // reset appointment
+                      onChange={(id) => {
+                        setSelectedOwnerId(id);
+                        setSelectedPetId(""); 
+                        setSelectedAppointmentId("");
                         setPatientDetails(null);
                         setAppointments([]);
                       }}
-                      className="h-11 w-full appearance-none rounded-xl border border-slate-200 dark:border-dark-border bg-slate-50 dark:bg-dark-surface pl-10 pr-8 text-sm text-slate-700 dark:text-zinc-300 focus:outline-none"
+                      placeholder="Search owner..."
                       disabled={status === "Finalized"}
-                    >
-                      <option value="">Select an owner...</option>
-                      {owners.map(o => (
-                        <option key={o.id} value={o.id}>
-                          {o.name}
-                        </option>
-                      ))}
-                    </select>
-                    <FiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-zinc-500" />
+                    />
                   </div>
 
                   <div className="relative">
                     <select
-                      value={selectedPatientId}
+                      value={selectedPetId}
                       onChange={handlePatientSelect}
                       disabled={!selectedOwnerId || status === "Finalized"}
                       className={clsx(
@@ -717,7 +767,7 @@ function InvoiceModuleView() {
                           const appt = appointments.find(a => a.id.toString() === newApptId.toString());
                           if (appt && appt.service) {
                             // Auto-load service into invoice
-                            const targetUrl = `/api/invoices/resolve-breakdown?service_id=${appt.service_id}&pet_id=${selectedPatientId || ""}&qty=1&weight=${currentWeight || ""}`;
+                            const targetUrl = `/api/invoices/resolve-breakdown?service_id=${appt.service_id}&pet_id=${selectedPetId || ""}&qty=1&weight=${currentWeight || ""}`;
                             console.log("[DEBUG] Fetching breakdown from:", targetUrl);
                             
                             api.get(targetUrl)
@@ -809,7 +859,7 @@ function InvoiceModuleView() {
                           }
                         }
                       }}
-                      disabled={!selectedPatientId || status === "Finalized"}
+                      disabled={!selectedPetId || status === "Finalized"}
                       className={clsx(
                         "h-11 w-full appearance-none rounded-xl border pl-4 pr-8 text-sm focus:outline-none disabled:opacity-50 dark:bg-dark-surface dark:text-zinc-300",
                         getError("appointment_id") ? "border-rose-500 bg-rose-50/10" : "border-slate-200 dark:border-dark-border bg-slate-50"
@@ -1226,6 +1276,15 @@ function InvoiceModuleView() {
               >
                 <FiDownload className="h-4 w-4" />
               </button>
+              {(status === "Finalized" || status === "Paid" || status === "Partially Paid") && (
+                <button
+                  onClick={cancelInvoice}
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-600 hover:bg-rose-100 transition-colors no-print"
+                >
+                  <FiAlertCircle className="h-4 w-4" />
+                  Cancel &amp; Reverse
+                </button>
+              )}
               <button
                 onClick={() => submitInvoice("Finalized")}
                 disabled={status !== "Draft"}
@@ -1236,7 +1295,7 @@ function InvoiceModuleView() {
               </button>
               <button
                 onClick={() => setIsSendModalOpen(true)}
-                disabled={status === "Draft"}
+                disabled={status === "Draft" || status === "Cancelled"}
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-100 dark:bg-dark-surface px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-zinc-300 hover:bg-slate-200 disabled:opacity-50"
               >
                 <FiBell className="h-4 w-4" />

@@ -1,16 +1,26 @@
-import { useState, useRef, useEffect } from "react";
-import clsx from "clsx";
-import { FiCalendar, FiChevronDown, FiCheckCircle, FiAlertCircle, FiCamera, FiUserPlus, FiUserCheck } from "react-icons/fi";
-import { LuFilePlus2, LuPawPrint } from "react-icons/lu";
-import { FiUser } from "react-icons/fi";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import clsx from "clsx";
+import { 
+  FiCheckCircle, 
+  FiUserCheck, 
+  FiUserPlus, 
+  FiChevronDown,
+  FiCamera,
+  FiUser,
+  FiAlertCircle
+} from "react-icons/fi";
+import { LuFilePlus2, LuPawPrint } from "react-icons/lu";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
 import { getAgeGroup } from "../../utils/petAgeGroups";
 import { useAuth } from "../../context/AuthContext";
 import { PHILIPPINE_CITIES } from "../../constants/locations";
 import PhoneInput from "../common/PhoneInput";
+import SearchableSelect from "../common/SearchableSelect";
+import SmartAddressGroup from "../common/SmartAddressGroup";
+import ValidationSummary from "../common/ValidationSummary";
 
 const steps = ["Pet Information", "Owner Details", "Medical History"];
  
@@ -111,6 +121,8 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
   const [ownersList, setOwnersList] = useState([]);
   const [isNewOwner, setIsNewOwner] = useState(!initialOwnerId);
   const [breedSuggestedSizeId, setBreedSuggestedSizeId] = useState(null);
+  const [duplicateOwner, setDuplicateOwner] = useState(null);
+  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -188,6 +200,49 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
   }, [breedIdValue, speciesIdValue, availableBreeds, setValue, weightValue]);
   
   const ownerPhoneValue = watch("owner_phone");
+  const ownerEmailValue = watch("owner_email");
+
+  // Proactive Duplicate Lookup
+  useEffect(() => {
+    if (!isNewOwner || !user?.token || (!ownerPhoneValue && !ownerEmailValue)) {
+      setDuplicateOwner(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      // Only lookup if phone or email seems potentially valid/filled
+      if (ownerPhoneValue?.length < 10 && ownerEmailValue?.length < 5) return;
+
+      setIsCheckingDuplicate(true);
+      try {
+        const query = new URLSearchParams();
+        if (ownerPhoneValue) query.append("phone", ownerPhoneValue);
+        if (ownerEmailValue) query.append("email", ownerEmailValue);
+
+        const res = await fetch(`/api/owners/lookup?${query.toString()}`, {
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${user.token}`
+          }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.found) {
+            setDuplicateOwner(data.owner);
+          } else {
+            setDuplicateOwner(null);
+          }
+        }
+      } catch (err) {
+        console.error("Duplicate lookup failed:", err);
+      } finally {
+        setIsCheckingDuplicate(false);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [ownerPhoneValue, ownerEmailValue, isNewOwner, user?.token]);
 
   const calculateDynamicSize = (weight, speciesId) => {
     if (!weight || !speciesId) return null;
@@ -244,6 +299,7 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
 
   const onSubmit = async (data) => {
     setError(null);
+    setDuplicateOwner(null);
     console.log("Submitting form data:", data);
     try {
       let finalOwnerId = initialOwnerId || data.owner_id;
@@ -276,6 +332,12 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
         if (!ownerRes.ok) {
           const errData = await ownerRes.json().catch(() => ({}));
           console.error("Owner creation failed:", errData);
+          
+          if (ownerRes.status === 422 && errData.existing_owner) {
+            setDuplicateOwner(errData.existing_owner);
+            throw new Error(errData.message || "An account with these details already exists.");
+          }
+
           if (ownerRes.status === 422 && errData.errors) {
             const messages = Object.values(errData.errors).flat().join(" ");
             throw new Error(messages || "Validation failed for owner details.");
@@ -358,14 +420,76 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
           <button type="button" onClick={onCancel} className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:border-slate-400 dark:border-dark-border dark:bg-dark-card dark:text-zinc-200">
             Cancel
           </button>
-          <button type="submit" form="add-patient-form" disabled={isSubmitting} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+          <button type="button" onClick={() => {
+            setValue("name", "");
+            setValue("owner_name", "");
+            setValue("owner_phone", "");
+            setValue("owner_email", "");
+            setError(null);
+            setDuplicateOwner(null);
+          }} className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700">
+            Clear Form
+          </button>
+          <button type="submit" form="add-patient-form" disabled={isSubmitting} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 shadow-lg shadow-blue-500/20">
             <FiCheckCircle className="h-4 w-4" />
-            {isSubmitting ? "Saving..." : "Save Pet Record"}
+            {isSubmitting ? "Saving..." : "Save Patient Record"}
           </button>
         </div>
       </div>
 
       <section className="card-shell overflow-hidden">
+        {/* Validation Error Summary */}
+        {Object.keys(errors).length > 0 && (
+          <div className="px-6 pt-6">
+            <ValidationSummary errors={errors} />
+          </div>
+        )}
+
+        {isCheckingDuplicate && (
+          <div className="bg-blue-600/5 px-6 py-2 flex items-center gap-2 text-[10px] font-bold text-blue-600 uppercase tracking-widest border-b border-blue-100 dark:border-blue-900/30">
+            <div className="h-2 w-2 rounded-full bg-blue-600 animate-pulse" />
+            Checking for existing client...
+          </div>
+        )}
+        
+        {duplicateOwner && isNewOwner && (
+          <div className="mx-6 mt-5 rounded-2xl border-2 border-blue-500 bg-blue-50/50 p-4 shadow-xl shadow-blue-500/5 animate-in zoom-in-95 duration-300">
+            <div className="flex items-start gap-4">
+              <div className="h-12 w-12 flex-shrink-0 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+                <FiUserCheck className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-lg font-bold text-slate-900 dark:text-zinc-100">Client Match Found</h4>
+                <p className="text-sm text-slate-600 dark:text-zinc-400">
+                  <span className="font-bold text-blue-600">{duplicateOwner.name}</span> is already in our system. 
+                  Would you like to reuse this profile for this pet?
+                </p>
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsNewOwner(false);
+                      setValue("owner_id", duplicateOwner.id.toString(), { shouldValidate: true });
+                      setDuplicateOwner(null);
+                      setError(null);
+                      // Preserve existing pet data by not resetting anything else
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700 transition-all"
+                  >
+                    Reuse Profile (Guided Merge)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDuplicateOwner(null)}
+                    className="px-4 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-zinc-300"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {!initialOwnerId && (
           <div className="flex flex-wrap items-center gap-8 border-b border-slate-200 px-6 py-4 dark:border-dark-border">
             {steps.map((step, index) => <StepPill key={step} index={index} label={step} active={index === 0} />)}
@@ -373,9 +497,49 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
         )}
 
         {error && (
-          <div className="mx-6 mt-5 flex items-center gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 border border-red-200">
-            <FiAlertCircle className="h-5 w-5 flex-shrink-0" />
-            <span>{error}</span>
+          <div className="mx-6 mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
+            <div className="flex items-start gap-3 text-sm text-red-700">
+              <FiAlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+              <div className="flex-1">
+                <span className="font-semibold block mb-1">Error</span>
+                <p>{error}</p>
+                
+                {duplicateOwner && (
+                  <div className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-white p-3 border border-red-100 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 flex-shrink-0 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                        <FiUser />
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-900">{duplicateOwner.name}</p>
+                        <p className="text-xs text-slate-500">{duplicateOwner.email || duplicateOwner.phone}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsNewOwner(false);
+                        setValue("owner_id", duplicateOwner.id.toString());
+                        setDuplicateOwner(null);
+                        setError(null);
+                        // Refresh owners list to be safe
+                        const headers = {
+                          "Accept": "application/json",
+                          "Authorization": `Bearer ${user.token}`
+                        };
+                        fetch("/api/owners", { headers }).then(res => res.json()).then(data => {
+                          const owners = data.data || data;
+                          if (Array.isArray(owners)) setOwnersList(owners);
+                        });
+                      }}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 transition-all"
+                    >
+                      <FiUserCheck /> Use This Owner
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -532,75 +696,53 @@ function AddPatientFormView({ onCancel, onSave, ownerId: initialOwnerId }) {
                 </div>
 
                 {isNewOwner ? (
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <div>
-                      <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Full Name *</label>
-                      <input {...register("owner_name")} className={getInputClass(errors.owner_name)} placeholder="e.g. Jordan Miller" />
-                      {errors.owner_name && <p className="mt-1 text-xs text-red-500">{errors.owner_name.message}</p>}
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Full Name *</label>
+                        <input {...register("owner_name")} className={getInputClass(errors.owner_name)} placeholder="e.g. Jordan Miller" />
+                        {errors.owner_name && <p className="mt-1 text-xs text-red-500 font-medium">{errors.owner_name.message}</p>}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Phone Number *</label>
+                        <PhoneInput
+                          value={ownerPhoneValue}
+                          onChange={(phone) => setValue("owner_phone", phone, { shouldValidate: true })}
+                          error={errors.owner_phone}
+                        />
+                      </div>
+                      <div className="lg:col-span-2">
+                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Email Address</label>
+                        <input type="email" {...register("owner_email")} className={getInputClass(errors.owner_email)} placeholder="owner@example.com" />
+                      </div>
                     </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Phone Number *</label>
-                      <PhoneInput
-                        value={ownerPhoneValue}
-                        onChange={(phone) => setValue("owner_phone", phone, { shouldValidate: true })}
-                        error={errors.owner_phone}
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Email Address</label>
-                      <input type="email" {...register("owner_email")} className={getInputClass(errors.owner_email)} placeholder="owner@example.com" />
-                    </div>
+
                     <div className="lg:col-span-2">
                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Street Address</label>
                        <input {...register("owner_address")} className={getInputClass(errors.owner_address)} placeholder="123 Main St" />
                     </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">City *</label>
-                      <div className="relative">
-                        <select 
-                          {...register("owner_city")} 
-                          className={getSelectClass(errors.owner_city)}
-                          onChange={(e) => {
-                            const city = e.target.value;
-                            setValue("owner_city", city);
-                            const data = PHILIPPINE_CITIES[city];
-                            if (data) {
-                              setValue("owner_province", data.province);
-                              setValue("owner_zip", data.zip);
-                            }
-                          }}
-                        >
-                          <option value="">Select City...</option>
-                          {Object.keys(PHILIPPINE_CITIES).sort().map(city => (
-                            <option key={city} value={city}>{city}</option>
-                          ))}
-                        </select>
-                        <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Province</label>
-                        <input {...register("owner_province")} className={clsx(getInputClass(errors.owner_province), "bg-slate-100 dark:bg-dark-surface/50")} placeholder="Province" readOnly />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Zip Code</label>
-                        <input {...register("owner_zip")} className={clsx(getInputClass(errors.owner_zip), "bg-slate-100 dark:bg-dark-surface/50")} placeholder="Zip" readOnly />
-                      </div>
-                    </div>
+
+                    <SmartAddressGroup 
+                      register={register}
+                      setValue={setValue}
+                      watch={watch}
+                      errors={errors}
+                    />
                   </div>
                 ) : (
                   <div>
                     <label className="mb-1 block text-sm font-semibold text-slate-600 dark:text-zinc-300">Existing Owner *</label>
-                    <div className="relative">
-                      <select {...register("owner_id")} className={getSelectClass(errors.owner_id)}>
-                        <option value="">Search and select an owner...</option>
-                        {ownersList.map(o => <option key={o.id} value={o.id}>{o.name} ({o.email || o.phone || "No contact info"})</option>)}
-                      </select>
-                      <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    </div>
-                    {errors.owner_id && <p className="mt-1 text-xs text-red-500 font-medium">{errors.owner_id.message}</p>}
-                    {errors.owner_name && !isNewOwner && <p className="mt-1 text-xs text-red-500 font-medium">{errors.owner_name.message}</p>}
+                    <SearchableSelect 
+                      options={ownersList.map(o => ({
+                        value: o.id.toString(),
+                        label: o.name,
+                        sublabel: o.email || o.phone || "No contact info"
+                      }))}
+                      value={watch("owner_id")}
+                      onChange={(id) => setValue("owner_id", id, { shouldValidate: true })}
+                      placeholder="Search and select an owner..."
+                      error={errors.owner_id?.message}
+                    />
                   </div>
                 )}
               </section>

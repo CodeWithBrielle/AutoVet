@@ -4,14 +4,24 @@ $app = require_once __DIR__.'/bootstrap/app.php';
 $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
 $kernel->bootstrap();
 
-$pet = App\Models\Pet::find(3);
+use App\Models\Pet;
+
+$id = 19;
+$pet = Pet::find($id);
+
 if ($pet) {
-    echo "ID: " . $pet->id . "\n";
-    echo "Name: " . $pet->name . "\n";
-    echo "Species ID: " . ($pet->species_id ?? 'NULL') . "\n";
-    echo "Breed ID: " . ($pet->breed_id ?? 'NULL') . "\n";
-    echo "Species Name: " . ($pet->species->name ?? 'NULL') . "\n";
-    echo "Breed Name: " . ($pet->breed->name ?? 'NULL') . "\n";
+    echo "Pet found: " . $pet->name . " (ID: $id)\n";
+    echo "Deleted At: " . ($pet->deleted_at ?? 'null') . "\n";
 } else {
-    echo "Pet not found.\n";
+    // Check if it's trashed
+    $trashed = Pet::onlyTrashed()->find($id);
+    if ($trashed) {
+        echo "Pet is TRASHED (Deleted): " . $trashed->name . " (ID: $id)\n";
+    } else {
+        echo "Pet NOT found in database (ID: $id)\n";
+    }
 }
+
+// List some pets to see what IDs exist
+echo "\nSome existing IDs:\n";
+print_r(Pet::limit(5)->pluck('id')->toArray());

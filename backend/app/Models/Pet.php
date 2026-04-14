@@ -70,8 +70,8 @@ class Pet extends Model
 
         static::created(function ($pet) {
             Notification::create([
-                'type' => 'PatientAdded',
-                'title' => 'New Patient Added',
+                'type' => 'PetAdded',
+                'title' => 'New Pet Added',
                 'message' => "{$pet->name} has been added to the system.",
                 'data' => [
                     'pet_id' => $pet->id,

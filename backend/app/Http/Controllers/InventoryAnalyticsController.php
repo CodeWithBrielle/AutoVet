@@ -23,12 +23,42 @@ class InventoryAnalyticsController extends Controller
 
         $totalValue = Inventory::sum(DB::raw('stock_level * cost_price'));
 
+        $label_mode = 'overview';
+        $interpretation = "";
+        $recommendations = [];
+        $confidence_note = "";
+
+        if ($outOfStock > 0 || $lowStock > 0 || $expiringSoon > 0) {
+            $interpretation = "Currently tracking {$totalItems} distinct items. Stock warnings detected.";
+            
+            if ($outOfStock > 0) {
+                $recommendations[] = "{$outOfStock} items are totally out of stock. Prioritize reordering today to avoid service disruptions.";
+            }
+            if ($lowStock > 0) {
+                $recommendations[] = "{$lowStock} items are dropping below minimum levels. Prepare a purchase order for these lines.";
+            }
+            if ($expiringSoon > 0) {
+                $recommendations[] = "{$expiringSoon} items are expiring soon. Consider discounting or returning to supplier.";
+            }
+        } else {
+            $interpretation = "Currently tracking {$totalItems} distinct items with healthy stock levels.";
+        }
+
         return response()->json([
-            'total_items' => $totalItems,
-            'out_of_stock' => $outOfStock,
-            'low_stock' => $lowStock,
-            'expiring_soon' => $expiringSoon,
-            'total_value' => round($totalValue, 2)
+            'success' => true,
+            'label_mode' => $label_mode,
+            'data' => [
+                'total_items' => $totalItems,
+                'out_of_stock' => $outOfStock,
+                'low_stock' => $lowStock,
+                'expiring_soon' => $expiringSoon,
+                'total_value' => round($totalValue, 2)
+            ],
+            'interpretation' => $interpretation,
+            'recommendations' => $recommendations,
+            'notable_findings' => [],
+            'data_basis' => "Aggregated counts from current active inventory records.",
+            'confidence_note' => $confidence_note
         ]);
     }
 
@@ -37,8 +67,10 @@ class InventoryAnalyticsController extends Controller
      */
     public function getTopMoving()
     {
-        // Calculate usage from both transactions (Adjustment Out, etc) and Invoice Items
         $topItems = InvoiceItem::with('inventory:id,item_name,sku')
+            ->whereHas('invoice', function ($query) {
+                $query->realized();
+            })
             ->select('inventory_id', DB::raw('SUM(qty) as total_quantity'))
             ->whereNotNull('inventory_id')
             ->groupBy('inventory_id')
@@ -46,7 +78,16 @@ class InventoryAnalyticsController extends Controller
             ->limit(5)
             ->get();
 
-        return response()->json($topItems);
+        return response()->json([
+            'success' => true,
+            'label_mode' => 'overview',
+            'data' => $topItems,
+            'interpretation' => "",
+            'recommendations' => [],
+            'notable_findings' => [],
+            'data_basis' => "Top 5 consumed inventory items extracted from realized invoices.",
+            'confidence_note' => ""
+        ]);
     }
 
     /**
@@ -59,7 +100,16 @@ class InventoryAnalyticsController extends Controller
             ->limit(5)
             ->get();
 
-        return response()->json($movements);
+        return response()->json([
+            'success' => true,
+            'label_mode' => 'overview',
+            'data' => $movements,
+            'interpretation' => "",
+            'recommendations' => [],
+            'notable_findings' => [],
+            'data_basis' => "Latest 5 inventory transactions.",
+            'confidence_note' => ""
+        ]);
     }
 
     /**
@@ -72,6 +122,15 @@ class InventoryAnalyticsController extends Controller
             ->limit(5)
             ->get();
 
-        return response()->json($items);
+        return response()->json([
+            'success' => true,
+            'label_mode' => 'overview',
+            'data' => $items,
+            'interpretation' => "",
+            'recommendations' => [],
+            'notable_findings' => [],
+            'data_basis' => "Items reaching expiration within next 30 days.",
+            'confidence_note' => ""
+        ]);
     }
 }

@@ -8,6 +8,8 @@ import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import { getPetImageUrl, getActualPetImageUrl } from "../../utils/petImages";
 import { getAgeGroup } from "../../utils/petAgeGroups";
+import SearchableSelect from "../common/SearchableSelect";
+import ValidationSummary from "../common/ValidationSummary";
 
 const inputBase =
     "h-11 w-full rounded-xl border bg-slate-50 px-3 text-sm text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none dark:bg-dark-surface dark:text-zinc-200 dark:placeholder:text-gray-500 dark:focus:bg-gray-800";
@@ -289,13 +291,8 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
                 </div>
 
                 <div className="overflow-y-auto p-6">
-                    {error && (
-                        <div className="mb-6 flex items-center gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                            <FiAlertCircle className="h-5 w-5 flex-shrink-0" />
-                            <span>{error}</span>
-                        </div>
-                    )}
-
+                    {Object.keys(errors).length > 0 && <ValidationSummary errors={errors} className="mb-6" />}
+                    
                     <form id="edit-patient-form" onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                         <section>
                             <h3 className="mb-4 text-lg font-semibold text-slate-800 dark:text-zinc-100">Pet Details</h3>
@@ -328,23 +325,27 @@ function EditPatientModal({ isOpen, onClose, patient, onSaveSuccess }) {
                                 </div>
                                 <div>
                                     <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400">Species *</label>
-                                    <div className="relative">
-                                        <select {...register("species_id")} className={getSelectClass(errors.species_id)}>
-                                            <option value="">Select Species...</option>
-                                            {speciesList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                        </select>
-                                        <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                    </div>
+                                    <SearchableSelect 
+                                        options={speciesList.map(s => ({ value: s.id.toString(), label: s.name }))}
+                                        value={watch("species_id")}
+                                        onChange={(id) => {
+                                            setValue("species_id", id, { shouldValidate: true });
+                                            setValue("breed_id", "");
+                                        }}
+                                        placeholder="Search species..."
+                                        error={errors.species_id?.message}
+                                    />
                                 </div>
                                 <div>
                                     <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400">Breed</label>
-                                    <div className="relative">
-                                        <select {...register("breed_id")} className={getSelectClass(errors.breed_id)} disabled={!speciesIdValue}>
-                                            <option value="">Select Breed...</option>
-                                            {availableBreeds.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                                        </select>
-                                        <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                    </div>
+                                    <SearchableSelect 
+                                        options={availableBreeds.map(b => ({ value: b.id.toString(), label: b.name }))}
+                                        value={watch("breed_id")}
+                                        onChange={(id) => setValue("breed_id", id, { shouldValidate: true })}
+                                        placeholder={speciesIdValue ? "Search breed..." : "Select species first"}
+                                        disabled={!speciesIdValue}
+                                        error={errors.breed_id?.message}
+                                    />
                                 </div>
                                 <div>
                                     <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-zinc-400">Date of Birth</label>

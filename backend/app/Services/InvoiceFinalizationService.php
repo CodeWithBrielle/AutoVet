@@ -93,4 +93,59 @@ class InvoiceFinalizationService
             ]);
         });
     }
+
+    /**
+     * Reverse inventory deduction if an invoice is cancelled.
+     * 
+     * @param Invoice $invoice
+     * @return void
+     * @throws Exception
+     */
+    public function reverseStockDeduction(Invoice $invoice)
+    {
+        DB::transaction(function () use ($invoice) {
+            // Only reverse if stock was actually deducted
+            if (!$invoice->stock_deducted) {
+                return;
+            }
+
+            foreach ($invoice->items as $item) {
+                if ($item->inventory_id && $item->is_confirmed_used && !$item->is_removed_from_template) {
+                    $inventoryItem = Inventory::where('id', $item->inventory_id)->lockForUpdate()->first();
+
+                    if (!$inventoryItem) {
+                        continue; // Should we log/throw? Usually, restoration should be best-effort or strict.
+                    }
+
+                    $oldStock = $inventoryItem->stock_level;
+                    $inventoryItem->stock_level += $item->qty;
+                    $inventoryItem->save();
+
+                    // Log the reversal transaction
+                    InventoryTransaction::create([
+                        'inventory_id' => $inventoryItem->id,
+                        'transaction_type' => 'Stock Correction (Reversal)',
+                        'quantity' => $item->qty,
+                        'previous_stock' => $oldStock,
+                        'new_stock' => $inventoryItem->stock_level,
+                        'remarks' => "Reversed deduction from Invoice #{$invoice->invoice_number} (Cancellation)",
+                        'created_by' => auth()->id() ?? (\App\Models\User::first()->id ?? null)
+                    ]);
+                }
+            }
+
+            $invoice->stock_deducted = false;
+            $invoice->save();
+
+            \Illuminate\Support\Facades\DB::table('invoice_audit_logs')->insert([
+                'invoice_id' => $invoice->id,
+                'user_id' => auth()->id() ?? null,
+                'action' => 'cancelled_invoice_reversal',
+                'entity' => 'all',
+                'new_value' => 'Stock Restored',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
+    }
 }

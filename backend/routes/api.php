@@ -66,6 +66,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Client Notifications
     Route::get('/client-notifications', [\App\Http\Controllers\ClientNotificationController::class, 'index']);
     Route::post('/client-notifications/send', [\App\Http\Controllers\ClientNotificationController::class, 'send']);
+    Route::post('/client-notifications/{notification}/retry', [\App\Http\Controllers\ClientNotificationController::class, 'retry']);
     Route::apiResource('client-notifications/templates', \App\Http\Controllers\NotificationTemplateController::class)->names('client-notifications.templates');
 
 
@@ -115,6 +116,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::apiResource('invoices',        InvoiceController::class);
         Route::apiResource('services',        ServiceController::class);
         Route::apiResource('medical-records', MedicalRecordController::class);
+        Route::get('owners/lookup',    [OwnerController::class, 'lookup']);
         Route::apiResource('owners',          OwnerController::class);
         Route::apiResource('pets',            \App\Http\Controllers\PetController::class);
         Route::post('vet-schedules/bulk',    [VetScheduleController::class, 'bulkStore']);
@@ -186,16 +188,16 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // -----------------------------------------------------------------------
     // Specialized Reports — restricted to Admin only
     // -----------------------------------------------------------------------
-    $reportRoles = Roles::adminRoles();
+        $reportRoles = Roles::adminRoles();
     Route::group(['prefix' => 'reports', 'middleware' => 'role:' . implode(',', $reportRoles)], function () {
 
         Route::get('/inventory/low-stock',            [\App\Http\Controllers\LowStockReportController::class, 'generate']);
         Route::get('/sales/revenue-summary',          [\App\Http\Controllers\SalesReportController::class, 'getRevenueSummary']);
         Route::get('/sales/top-services',             [\App\Http\Controllers\SalesReportController::class, 'getTopServices']);
         Route::get('/sales/transaction-volume',       [\App\Http\Controllers\SalesReportController::class, 'getTransactionVolume']);
-        Route::get('/patients/species-distribution',  [\App\Http\Controllers\PatientReportController::class, 'getSpeciesDistribution']);
-        Route::get('/patients/registration-trends',   [\App\Http\Controllers\PatientReportController::class, 'getRegistrationTrends']);
-        Route::get('/patients/demographics',          [\App\Http\Controllers\PatientReportController::class, 'getDemographics']);
+        Route::get('/pets/species-distribution',      [\App\Http\Controllers\PetReportController::class, 'getSpeciesDistribution']);
+        Route::get('/pets/registration-trends',       [\App\Http\Controllers\PetReportController::class, 'getRegistrationTrends']);
+        Route::get('/pets/demographics',              [\App\Http\Controllers\PetReportController::class, 'getDemographics']);
         
         // Inventory Analytics
         Route::get('/inventory/summary',              [\App\Http\Controllers\InventoryAnalyticsController::class, 'getSummary']);
@@ -203,4 +205,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/inventory/recent-movements',     [\App\Http\Controllers\InventoryAnalyticsController::class, 'getRecentMovements']);
         Route::get('/inventory/expiring-soon',        [\App\Http\Controllers\InventoryAnalyticsController::class, 'getExpiringSoon']);
     });
+});
+
+// ---------------------------------------------------------------------------
+// Integrity & Verification Routes (Local Environment Only)
+// Gated inside controller via App::environment('local')
+// ---------------------------------------------------------------------------
+Route::group(['prefix' => 'test/integrity'], function () {
+    Route::get('/rollback', [\App\Http\Controllers\IntegrityTestController::class, 'testRollback']);
+    Route::get('/collision', [\App\Http\Controllers\IntegrityTestController::class, 'testCollision']);
 });

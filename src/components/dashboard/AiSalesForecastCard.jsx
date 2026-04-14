@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FiCircle } from "react-icons/fi";
+import * as Icons from "react-icons/fi";
 import { LuSparkles } from "react-icons/lu";
 import { formatCurrency, formatCurrencyShort } from "../../utils/formatters";
 import clsx from "clsx";
@@ -21,6 +21,7 @@ function createPath(points) {
 function AiSalesForecastCard() {
     const [activeRange, setActiveRange] = useState("6 Months");
     const [data, setData] = useState([]);
+    const [aiResponse, setAiResponse] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
 
     const { user } = useAuth();
@@ -35,7 +36,10 @@ function AiSalesForecastCard() {
         api.get(`/api/dashboard/sales-forecast?range=${activeRange}`)
             .then(res => {
                 if (!isMounted) return;
-                setData(res.data);
+                // Standardized structure handling
+                const response = res.data;
+                setAiResponse(response);
+                setData(response.data || []);
                 setIsLoading(false);
             })
             .catch(err => {
@@ -94,7 +98,9 @@ function AiSalesForecastCard() {
                         <LuSparkles className="text-emerald-500 w-6 h-6" />
                         Sales Insights
                     </h3>
-                    <p className="mt-1 text-sm font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">Revenue Projection • AI Synthesis</p>
+                    <p className="mt-1 text-sm font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">
+                        Revenue Projection • {aiResponse?.label_mode === 'overview' ? 'Standard Reporting' : 'AI Synthesis'}
+                    </p>
                 </div>
                 <div className="flex items-center gap-1 rounded-2xl bg-slate-100/80 p-1 dark:bg-zinc-800/40">
                     <button
@@ -127,10 +133,12 @@ function AiSalesForecastCard() {
                     <span className="h-2 w-2 rounded-full bg-emerald-600" />
                     Actual Revenue
                 </span>
-                <span className="inline-flex items-center gap-2 text-slate-400 dark:text-zinc-600">
-                    <span className="h-2 w-2 rounded-full border-2 border-slate-300 dark:border-zinc-700" />
-                    AI Prediction
-                </span>
+                {aiResponse?.label_mode !== 'overview' && (
+                    <span className="inline-flex items-center gap-2 text-slate-400 dark:text-zinc-600">
+                        <span className="h-2 w-2 rounded-full border-2 border-slate-300 dark:border-zinc-700" />
+                        AI Prediction
+                    </span>
+                )}
             </div>
 
             <div className="relative rounded-[2rem] bg-slate-50/50 p-6 dark:bg-zinc-900/20 border border-slate-100 dark:border-zinc-800/50 relative z-10">
@@ -141,9 +149,9 @@ function AiSalesForecastCard() {
                 ) : safeData.length === 0 ? (
                     <div className="h-[330px] w-full flex flex-col items-center justify-center text-center px-6">
                         <LuSparkles className="w-12 h-12 text-emerald-300 mb-4 opacity-50" />
-                        <h4 className="text-slate-700 dark:text-zinc-200 font-bold italic">Insufficient Data for AI Forecasting</h4>
+                        <h4 className="text-slate-700 dark:text-zinc-200 font-bold italic">Insufficient Historical Data</h4>
                         <p className="mt-2 text-xs text-slate-500 dark:text-zinc-500 max-w-[200px]">
-                            Once you have recorded sales over several weeks, our algorithm will begin projecting your future revenue.
+                            Once sales have been recorded over several weeks, the system will begin projecting future revenue.
                         </p>
                     </div>
                 ) : (
@@ -199,6 +207,69 @@ function AiSalesForecastCard() {
                     </>
                 )}
             </div>
+
+            {aiResponse && !isLoading && data.length > 0 && (
+                <div className="mt-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                    {/* Interpretation Layer */}
+                    <div className="rounded-2xl bg-emerald-50/50 p-6 border border-emerald-100/50 dark:bg-emerald-900/10 dark:border-emerald-800/30">
+                        <div className="flex items-center gap-2 mb-3">
+                            <div className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
+                                <LuSparkles className="w-4 h-4" />
+                            </div>
+                            <h4 className="text-xs font-black uppercase tracking-widest text-emerald-800 dark:text-emerald-300">
+                                {aiResponse.label_mode === 'overview' ? 'Pattern Overview' : 'AI Interpretation'}
+                            </h4>
+                        </div>
+                        <p className="text-sm font-medium text-slate-700 dark:text-zinc-300 leading-relaxed">
+                            {aiResponse.interpretation}
+                        </p>
+                        {aiResponse.anomaly?.detected && (
+                            <div className="mt-4 flex items-start gap-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/30">
+                                <Icons.FiAlertTriangle className="w-4 h-4 text-amber-600 mt-0.5" />
+                                <div className="space-y-1">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400">Anomalous {aiResponse.anomaly.type} Detected</p>
+                                    <p className="text-xs text-amber-800/80 dark:text-amber-300/80">{aiResponse.anomaly.explanation}</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Recommendation Layer */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-4">
+                            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-zinc-600 flex items-center gap-2">
+                                <Icons.FiTarget className="w-3 h-3" />
+                                Actionable Recommendations
+                            </h4>
+                            <div className="space-y-2">
+                                {aiResponse.recommendations.map((rec, i) => (
+                                    <div key={i} className="flex items-start gap-3 p-4 rounded-xl bg-white dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 shadow-sm">
+                                        <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                        <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">{rec}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col justify-end p-6 rounded-2xl border border-dashed border-slate-200 dark:border-zinc-800 bg-slate-50/30 dark:bg-zinc-900/10">
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 mb-1">Data Basis</p>
+                                    <p className="text-[11px] font-bold text-slate-600 dark:text-zinc-400">{aiResponse.data_basis}</p>
+                                </div>
+                                {aiResponse.confidence_note && (
+                                    <div className="pt-4 border-t border-slate-100 dark:border-zinc-800">
+                                        <p className="text-[9px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest flex items-start gap-1">
+                                            <Icons.FiShield className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                            Defense Note: {aiResponse.confidence_note}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }

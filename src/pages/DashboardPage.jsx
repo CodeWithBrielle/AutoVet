@@ -3,6 +3,8 @@ import InventoryChartCard from "../components/dashboard/InventoryChartCard";
 import MetricCard from "../components/dashboard/MetricCard";
 import RecentNotificationsCard from "../components/dashboard/RecentNotificationsCard";
 import AiSalesForecastCard from "../components/dashboard/AiSalesForecastCard";
+import AiAppointmentIntelligence from "../components/dashboard/AiAppointmentIntelligence";
+import ErrorBoundary from "../components/ErrorBoundary";
 import * as Icons from "react-icons/fi";
 import { useAuth } from "../context/AuthContext";
 import { ROLES } from "../constants/roles";
@@ -112,14 +114,27 @@ function DashboardPage() {
 
       <section className="grid grid-cols-1 gap-6 2xl:grid-cols-[2fr_1fr]">
         <div className="space-y-6">
-          {!isStaff && <AiSalesForecastCard />}
-          <InventoryChartCard />
+          {!isStaff && (
+            <ErrorBoundary label="Sales Forecast">
+              <AiSalesForecastCard />
+            </ErrorBoundary>
+          )}
+          <ErrorBoundary label="Inventory Consumption">
+            <InventoryChartCard />
+          </ErrorBoundary>
         </div>
-        <RecentNotificationsCard 
-          items={notifications} 
-          onMarkAllRead={handleMarkAllRead}
-          onDismiss={handleDismissNotification}
-        />
+        <div className="space-y-6">
+          <ErrorBoundary label="Appointment Intelligence">
+            <AiAppointmentIntelligence />
+          </ErrorBoundary>
+          <ErrorBoundary label="Recent Notifications">
+            <RecentNotificationsCard
+              items={notifications}
+              onMarkAllRead={handleMarkAllRead}
+              onDismiss={handleDismissNotification}
+            />
+          </ErrorBoundary>
+        </div>
       </section>
     </div>
   );

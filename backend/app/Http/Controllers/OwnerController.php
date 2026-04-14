@@ -5,41 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\Owner;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use libphonenumber\PhoneNumberUtil;
-use libphonenumber\PhoneNumberFormat;
-use libphonenumber\NumberParseException;
+use App\Traits\NormalizesData;
+use App\Traits\StandardizesResponses;
 
 class OwnerController extends Controller
 {
-    /**
-     * Normalize phone number to +639XXXXXXXXX format.
-     */
-    private function normalizePhone(?string $phone): ?string
-    {
-        if (!$phone) return null;
-
-        // Strip non-numeric characters except +
-        $phone = preg_replace('/(?<!^)\+|[^0-9+]/', '', $phone);
-
-        // Handle local PH format 09XXXXXXXXX -> +639XXXXXXXXX
-        if (preg_match('/^09\d{9}$/', $phone)) {
-            $phone = '+63' . substr($phone, 1);
-        }
-
-        $phoneUtil = PhoneNumberUtil::getInstance();
-        try {
-            // Parse with PH as default
-            $numberProto = $phoneUtil->parse($phone, "PH");
-            
-            if ($phoneUtil->isValidNumber($numberProto)) {
-                return $phoneUtil->format($numberProto, PhoneNumberFormat::E164);
-            }
-        } catch (NumberParseException $e) {
-            // Log if needed
-        }
-
-        return $phone; // Return cleaned numeric string as fallback
-    }
+    use NormalizesData, StandardizesResponses;
 
     public function import(Request $request)
     {
@@ -75,6 +46,9 @@ class OwnerController extends Controller
             $validator = Validator::make($ownerData, [
                 'name' => 'required|string|max:255',
                 'phone' => 'required|string',
+                'city' => 'required|string|max:255',
+                'province' => 'required|string|max:255',
+                'zip' => 'required|numeric|digits:4',
             ]);
 
             if ($validator->fails()) {
@@ -118,52 +92,75 @@ class OwnerController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'phone' => [
-                'required',
-                'string',
-                function ($attribute, $value, $fail) {
-                    $cleaned = preg_replace('/(?<!^)\+|[^0-9+]/', '', $value);
-                    if (strlen($cleaned) < 10) {
-                        $fail('The phone number is too short (min 10 digits).');
-                        return;
-                    }
-                    
-                    $phoneUtil = PhoneNumberUtil::getInstance();
-                    try {
-                        $tempValue = $cleaned;
-                        if (preg_match('/^09\d{9}$/', $tempValue)) {
-                            $tempValue = '+63' . substr($tempValue, 1);
-                        }
-                        $numberProto = $phoneUtil->parse($tempValue, "PH");
-                        if (!$phoneUtil->isValidNumber($numberProto)) {
-                            $fail('The phone number is not a valid international number.');
-                        }
-                    } catch (NumberParseException $e) {
-                        $fail('The phone number format is invalid.');
-                    }
-                },
-            ],
+            'phone' => 'required|string',
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string|max:255',
             'city' => 'required|string|max:255',
             'province' => 'required|string|max:255',
-            'zip' => 'required|string|max:255',
+            'zip' => 'required|numeric|digits:4',
         ], [
             'phone.required' => 'Phone number is required.',
         ]);
 
-        $validated['phone'] = $this->normalizePhone($validated['phone']);
+        $normalizedPhone = $this->normalizePhone($validated['phone']);
+        $normalizedEmail = $this->normalizeEmail($validated['email'] ?? null);
 
-        // Check for duplicate after normalization
-        if (Owner::where('phone', $validated['phone'])->exists()) {
-            return response()->json([
-                'message' => 'An owner with this phone number already exists.',
-                'errors' => ['phone' => ['This phone number is already registered.']]
-            ], 422);
+        // 1. Check for phone duplicate (Standardized manual defense)
+        $existingByPhone = Owner::where('phone', $normalizedPhone)->first();
+        if ($existingByPhone) {
+            return $this->errorResponse(
+                'DUPLICATE_ENTRY',
+                'phone',
+                'An owner with this phone number already exists.',
+                ['phone' => ['This phone number is already registered.']],
+                422,
+                $existingByPhone->load('pets')
+            );
         }
 
-        $owner = Owner::create($validated);
-        return response()->json($owner, 201);
+        // 2. Check for email duplicate (Standardized manual defense)
+        if ($normalizedEmail) {
+            $existingByEmail = Owner::where('email', $normalizedEmail)->first();
+            if ($existingByEmail) {
+                return $this->errorResponse(
+                    'DUPLICATE_ENTRY',
+                    'email',
+                    'An owner with this email already exists.',
+                    ['email' => ['This email address is already registered.']],
+                    422,
+                    $existingByEmail->load('pets')
+                );
+            }
+        }
+
+        // Apply Precision Normalization & Sanitization
+        $validated['phone'] = $normalizedPhone;
+        $validated['email'] = $normalizedEmail;
+        $validated['city'] = $this->sanitizeLabel($validated['city']);
+        $validated['province'] = $this->sanitizeLabel($validated['province']);
+        // Note: Name is also title-cased for consistency
+        $validated['name'] = $this->sanitizeLabel($validated['name']);
+
+        try {
+            $owner = Owner::create($validated);
+            return $this->successResponse($owner, 'Owner registered successfully.', 201);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Database-level safety net
+            if ($e->getCode() === '23000' || str_contains($e->getMessage(), '1062')) {
+                $conflictSource = str_contains($e->getMessage(), 'active_phone') ? 'phone' : (str_contains($e->getMessage(), 'active_email') ? 'email' : 'phone');
+                $existing = ($conflictSource === 'phone') ? Owner::where('phone', $normalizedPhone)->first() : Owner::where('email', $normalizedEmail)->first();
+                
+                return $this->errorResponse(
+                    'DUPLICATE_ENTRY',
+                    $conflictSource,
+                    'A database conflict occurred during registration.',
+                    [$conflictSource => ['Duplicate entry detected at database level.']],
+                    422,
+                    $existing ? $existing->load('pets') : null
+                );
+            }
+            throw $e;
+        }
     }
 
     public function show(Owner $owner)
@@ -175,57 +172,127 @@ class OwnerController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'phone' => [
-                'required',
-                'string',
-                function ($attribute, $value, $fail) {
-                    $cleaned = preg_replace('/(?<!^)\+|[^0-9+]/', '', $value);
-                    if (strlen($cleaned) < 10) {
-                        $fail('The phone number is too short (min 10 digits).');
-                        return;
-                    }
-
-                    $phoneUtil = PhoneNumberUtil::getInstance();
-                    try {
-                        $tempValue = $cleaned;
-                        if (preg_match('/^09\d{9}$/', $tempValue)) {
-                            $tempValue = '+63' . substr($tempValue, 1);
-                        }
-                        $numberProto = $phoneUtil->parse($tempValue, "PH");
-                        if (!$phoneUtil->isValidNumber($numberProto)) {
-                            $fail('The phone number is not a valid international number.');
-                        }
-                    } catch (NumberParseException $e) {
-                        $fail('The phone number format is invalid.');
-                    }
-                },
-            ],
+            'phone' => 'required|string',
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string|max:255',
             'city' => 'required|string|max:255',
             'province' => 'required|string|max:255',
-            'zip' => 'required|string|max:255',
+            'zip' => 'required|numeric|digits:4',
         ], [
             'phone.required' => 'Phone number is required.',
         ]);
 
-        $validated['phone'] = $this->normalizePhone($validated['phone']);
+        $normalizedPhone = $this->normalizePhone($validated['phone']);
+        $normalizedEmail = $this->normalizeEmail($validated['email'] ?? null);
 
-        // Check for duplicate after normalization (excluding current owner)
-        if (Owner::where('phone', $validated['phone'])->where('id', '!=', $owner->id)->exists()) {
-            return response()->json([
-                'message' => 'Another owner with this phone number already exists.',
-                'errors' => ['phone' => ['This phone number is already registered to another owner.']]
-            ], 422);
+        // Check for duplicate phone (excluding self)
+        $existingPhone = Owner::where('phone', $normalizedPhone)->where('id', '!=', $owner->id)->first();
+        if ($existingPhone) {
+            return $this->errorResponse(
+                'DUPLICATE_ENTRY',
+                'phone',
+                'Another owner with this phone number already exists.',
+                ['phone' => ['This phone number is already registered to another owner.']],
+                422,
+                $existingPhone->load('pets')
+            );
         }
 
-        $owner->update($validated);
-        return response()->json($owner);
+        // Check for duplicate email (excluding self)
+        if ($normalizedEmail) {
+            $existingEmail = Owner::where('email', $normalizedEmail)->where('id', '!=', $owner->id)->first();
+            if ($existingEmail) {
+                return $this->errorResponse(
+                    'DUPLICATE_ENTRY',
+                    'email',
+                    'Another owner with this email already exists.',
+                    ['email' => ['This email address is already registered to another owner.']],
+                    422,
+                    $existingEmail->load('pets')
+                );
+            }
+        }
+
+        $validated['phone'] = $normalizedPhone;
+        $validated['email'] = $normalizedEmail;
+        $validated['city'] = $this->sanitizeLabel($validated['city']);
+        $validated['province'] = $this->sanitizeLabel($validated['province']);
+        $validated['name'] = $this->sanitizeLabel($validated['name']);
+
+        try {
+            $owner->update($validated);
+            return $this->successResponse($owner, 'Owner profile updated.');
+        } catch (\Illuminate\Database\QueryException $e) {
+            if ($e->getCode() === '23000' || str_contains($e->getMessage(), '1062')) {
+                $conflictSource = str_contains($e->getMessage(), 'active_phone') ? 'phone' : (str_contains($e->getMessage(), 'active_email') ? 'email' : 'phone');
+                return $this->errorResponse(
+                    'DUPLICATE_ENTRY',
+                    $conflictSource,
+                    'Update failed due to a duplicate entry in the database.',
+                    [$conflictSource => ['Uniqueness violation at database level.']]
+                );
+            }
+            throw $e;
+        }
+    }
+
+    public function lookup(Request $request)
+    {
+        $phone = $request->query('phone');
+        $email = $request->query('email');
+
+        if (!$phone && !$email) {
+            return response()->json(['message' => 'No search term provided'], 400);
+        }
+
+        $query = Owner::query();
+
+        if ($phone) {
+            $normalizedPhone = $this->normalizePhone($phone);
+            $query->where('phone', $normalizedPhone);
+        }
+
+        if ($email) {
+            $normalizedEmail = $this->normalizeEmail($email);
+            $query->orWhere('email', $normalizedEmail);
+        }
+
+        $owner = $query->with('pets')->first();
+
+        return response()->json([
+            'found' => (bool)$owner,
+            'owner' => $owner
+        ]);
     }
 
     public function destroy(Owner $owner)
     {
-        $owner->delete();
-        return response()->json(null, 204);
+        // Guard against orphaning pets
+        if ($owner->pets()->exists()) {
+            return $this->errorResponse(
+                'RESTRICTED_DELETION',
+                'relationship',
+                'This owner cannot be deleted because they have active pets registered in the system.',
+                ['pets' => ['Owner has associated pet records.']],
+                403
+            );
+        }
+
+        try {
+            $owner->delete();
+            return $this->successResponse(null, 'Owner record archived.', 200);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle restricted deletion if owner has active pets/records
+            if ($e->getCode() === '23000' || str_contains($e->getMessage(), '1451')) {
+                return $this->errorResponse(
+                    'RESTRICTED_DELETION',
+                    'relationship',
+                    'This owner cannot be deleted because they have active pets or historical medical/billing records attached to them.',
+                    ['pets' => ['Record is currently referenced by other modules.']],
+                    403
+                );
+            }
+            throw $e;
+        }
     }
 }

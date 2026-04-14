@@ -16,7 +16,7 @@ import api from "../utils/api";
  */
 function SimpleLineChart({ data, width = 600, height = 240, color = "#10b981", dataKey = "total", prefix = "" }) {
   if (!data || !Array.isArray(data) || data.length === 0) {
-    return <div className="h-[240px] flex items-center justify-center text-slate-400 font-medium bg-slate-50 dark:bg-zinc-900/50 rounded-xl">No historical data available</div>;
+    return <div className="h-[240px] flex items-center justify-center text-slate-400 font-medium bg-slate-50 dark:bg-zinc-900/50 rounded-xl">Insufficient historical data</div>;
   }
 
   const paddingX = 50;
@@ -161,6 +161,70 @@ function SimpleBarChart({ data, width = 600, height = 300, color = "#6366f1", pr
   );
 }
 
+function InterpretationPanel({ report }) {
+  if (!report) return null;
+
+  const isAI = report.label_mode === 'ai';
+  const hasInterpretation = Boolean(report.interpretation);
+  const hasRecs = report.recommendations && report.recommendations.length > 0;
+  
+  if (!hasInterpretation && !hasRecs && report.label_mode !== 'overview') {
+      return null;
+  }
+
+  return (
+    <div className="bg-slate-50 dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-xl p-6 mt-6">
+      <div className="flex items-center gap-2 mb-4">
+        {isAI ? (
+            <div className="rounded-full bg-amber-100 dark:bg-amber-900/30 p-1.5 ring-1 ring-amber-500/20">
+                <FiIcons.FiZap className="text-amber-500 w-4 h-4" />
+            </div>
+        ) : (
+            <div className="rounded-full bg-blue-100 dark:bg-blue-900/30 p-1.5 ring-1 ring-blue-500/20">
+                <FiIcons.FiInfo className="text-blue-500 w-4 h-4" />
+            </div>
+        )}
+        <h4 className="text-xs font-black text-slate-800 dark:text-zinc-50 uppercase tracking-[0.15em]">
+          {isAI ? 'AI Interpretation' : 'System Overview'}
+        </h4>
+      </div>
+      
+      {hasInterpretation ? (
+        <p className="text-sm font-medium text-slate-700 dark:text-zinc-300 leading-relaxed mb-4">{report.interpretation}</p>
+      ) : (
+        <p className="text-sm font-medium text-slate-400 dark:text-zinc-500 italic mb-4">
+          {(!report.data || report.data?.length === 0) ? "No data available" : "Insufficient historical data for forecasting"}
+        </p>
+      )}
+
+      {hasRecs ? (
+        <div className="space-y-3 mb-4">
+          <p className="text-[10px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-widest">Recommended Actions</p>
+          <ul className="space-y-2">
+            {report.recommendations.map((rec, idx) => (
+              <li key={idx} className="text-sm text-slate-600 dark:text-zinc-400 flex gap-3 items-start">
+                <FiIcons.FiCheckCircle className="mt-0.5 flex-shrink-0 text-emerald-500 w-4 h-4" />
+                <span className="leading-snug">{rec}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : isAI ? (
+         <p className="text-sm text-slate-400 dark:text-zinc-500 italic mb-4">No actionable insights available</p>
+      ) : null}
+
+      {isAI && report.confidence_note && (
+        <div className="mt-4 pt-4 border-t border-slate-200 dark:border-zinc-800">
+           <p className="text-[10px] leading-relaxed font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">
+             <FiIcons.FiShield className="inline-block mr-1 w-3 h-3 mb-0.5" /> 
+             Defense Note: {report.confidence_note}
+           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportsPage() {
   const [activeTab, setActiveTab] = useState("Sales");
   const [salesData, setSalesData] = useState({ revenue: [], topServices: [], volume: [] });
@@ -191,9 +255,9 @@ function ReportsPage() {
           });
         } else if (activeTab === "Patients") {
           const [speciesRes, trendsRes, demographicsRes] = await Promise.all([
-            api.get("/api/reports/patients/species-distribution"),
-            api.get("/api/reports/patients/registration-trends"),
-            api.get("/api/reports/patients/demographics")
+            api.get("/api/reports/pets/species-distribution"),
+            api.get("/api/reports/pets/registration-trends"),
+            api.get("/api/reports/pets/demographics")
           ]);
           if (isMounted) setPatientData({ 
             species: speciesRes.data, 
@@ -231,13 +295,15 @@ function ReportsPage() {
 
   // Defensive Metrics Normalization
   const salesMetrics = useMemo(() => {
-    const revenue = Array.isArray(salesData.revenue) 
-      ? salesData.revenue.reduce((acc, curr) => acc + Number(curr.total || 0), 0)
-      : (typeof salesData.revenue === 'number' ? salesData.revenue : 0);
+    const revenueArray = salesData.revenue?.data || [];
+    const revenue = Array.isArray(revenueArray) 
+      ? revenueArray.reduce((acc, curr) => acc + Number(curr.total || 0), 0)
+      : 0;
     
-    const volume = Array.isArray(salesData.volume)
-      ? salesData.volume.reduce((acc, curr) => acc + Number(curr.count || 0), 0)
-      : (typeof salesData.volume === 'number' ? salesData.volume : 0);
+    const volumeArray = salesData.volume?.data || [];
+    const volume = Array.isArray(volumeArray)
+      ? volumeArray.reduce((acc, curr) => acc + Number(curr.count || 0), 0)
+      : 0;
       
     const avgTicket = volume > 0 ? revenue / volume : 0;
     
@@ -245,8 +311,9 @@ function ReportsPage() {
   }, [salesData]);
 
   const patientMetrics = useMemo(() => {
-    const totalPatients = Array.isArray(patientData.trends)
-      ? patientData.trends.reduce((acc, curr) => acc + Number(curr.total || 0), 0)
+    const trendsArray = patientData.trends?.data || [];
+    const totalPatients = Array.isArray(trendsArray)
+      ? trendsArray.reduce((acc, curr) => acc + Number(curr.total || 0), 0)
       : 0;
     return { totalPatients };
   }, [patientData]);
@@ -349,7 +416,8 @@ function ReportsPage() {
                   <FiIcons.FiTrendingUp className="text-emerald-600 h-5 w-5" />
                 </div>
               </div>
-              <SimpleLineChart data={salesData.revenue} color="#10b981" prefix="₱" />
+              <SimpleLineChart data={salesData.revenue?.data || []} color="#10b981" prefix="₱" />
+              <InterpretationPanel report={salesData.revenue} />
             </div>
 
             <div className="card-shell p-8">
@@ -362,20 +430,22 @@ function ReportsPage() {
                   <FiIcons.FiBarChart2 className="text-indigo-600 h-5 w-5" />
                 </div>
               </div>
-              <SimpleBarChart data={salesData.topServices} color="#6366f1" prefix="₱" />
+              <SimpleBarChart data={salesData.topServices?.data || []} color="#6366f1" prefix="₱" />
+              <InterpretationPanel report={salesData.topServices} />
             </div>
 
             <div className="card-shell p-8 col-span-full">
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h3 className="text-xl font-black text-slate-800 dark:text-zinc-50 tracking-tight">Activity Density</h3>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Finalized Transaction Volume Forecast</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Finalized Transaction Volume</p>
                 </div>
                 <div className="rounded-full bg-amber-100 p-2 dark:bg-amber-900/30">
                   <FiIcons.FiActivity className="text-amber-600 h-5 w-5" />
                 </div>
               </div>
-              <SimpleLineChart data={salesData.volume} dataKey="count" color="#f59e0b" />
+              <SimpleLineChart data={salesData.volume?.data || []} dataKey="count" color="#f59e0b" />
+              <InterpretationPanel report={salesData.volume} />
             </div>
           </div>
         </section>
@@ -394,7 +464,7 @@ function ReportsPage() {
              }} />
              <MetricCard card={{
                 title: "Species Diversity",
-                value: patientData.species.length.toString(),
+                value: (patientData.species?.data?.length ?? 0).toString(),
                 icon: FiIcons.FiTarget,
                 iconBg: "bg-rose-50 dark:bg-rose-900/20",
                 iconColor: "text-rose-600 dark:text-rose-400",
@@ -410,7 +480,8 @@ function ReportsPage() {
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Patient Population by Species</p>
                 </div>
               </div>
-              <SimpleBarChart data={patientData.species} color="#3b82f6" />
+              <SimpleBarChart data={patientData.species?.data || []} color="#3b82f6" />
+              <InterpretationPanel report={patientData.species} />
             </div>
             <div className="card-shell p-8">
                <div className="flex items-center justify-between mb-8">
@@ -419,7 +490,8 @@ function ReportsPage() {
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">New Registrations Gradient</p>
                 </div>
               </div>
-              <SimpleLineChart data={patientData.trends} dataKey="total" color="#10b981" />
+              <SimpleLineChart data={patientData.trends?.data || []} dataKey="total" color="#10b981" />
+              <InterpretationPanel report={patientData.trends} />
             </div>
           </div>
         </section>
@@ -427,13 +499,13 @@ function ReportsPage() {
 
       {activeTab === "Inventory" && (
         <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full space-y-8">
-          {inventoryData.summary ? (
+          {inventoryData.summary?.data ? (
             <>
               {/* Summary Metrics */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6 w-full">
                 <MetricCard card={{
                   title: "Total SKUs",
-                  value: inventoryData.summary.total_items.toString(),
+                  value: inventoryData.summary.data.total_items.toString(),
                   icon: FiIcons.FiBox,
                   iconBg: "bg-blue-50 dark:bg-blue-900/20",
                   iconColor: "text-blue-600 dark:text-blue-400",
@@ -441,7 +513,7 @@ function ReportsPage() {
                 }} />
                  <MetricCard card={{
                   title: "Low Stock",
-                  value: inventoryData.summary.low_stock.toString(),
+                  value: inventoryData.summary.data.low_stock.toString(),
                   icon: FiIcons.FiAlertCircle,
                   iconBg: "bg-amber-50 dark:bg-amber-900/20",
                   iconColor: "text-amber-600 dark:text-amber-400",
@@ -449,7 +521,7 @@ function ReportsPage() {
                 }} />
                 <MetricCard card={{
                   title: "Out of Stock",
-                  value: inventoryData.summary.out_of_stock.toString(),
+                  value: inventoryData.summary.data.out_of_stock.toString(),
                   icon: FiIcons.FiSlash,
                   iconBg: "bg-rose-50 dark:bg-rose-900/20",
                   iconColor: "text-rose-600 dark:text-rose-400",
@@ -457,7 +529,7 @@ function ReportsPage() {
                 }} />
                 <MetricCard card={{
                   title: "Expiring Soon",
-                  value: inventoryData.summary.expiring_soon.toString(),
+                  value: inventoryData.summary.data.expiring_soon.toString(),
                   icon: FiIcons.FiClock,
                   iconBg: "bg-orange-50 dark:bg-orange-900/20",
                   iconColor: "text-orange-600 dark:text-orange-400",
@@ -465,7 +537,7 @@ function ReportsPage() {
                 }} />
                 <MetricCard card={{
                   title: "Inventory Value",
-                  value: formatCurrency(inventoryData.summary.total_value),
+                  value: formatCurrency(inventoryData.summary.data.total_value),
                   icon: FiIcons.FiDollarSign,
                   iconBg: "bg-emerald-50 dark:bg-emerald-900/20",
                   iconColor: "text-emerald-600 dark:text-emerald-400",
@@ -490,14 +562,17 @@ function ReportsPage() {
                         <FiIcons.FiActivity className="text-blue-600 h-5 w-5" />
                       </div>
                     </div>
-                    {inventoryData.topMoving.length > 0 ? (
+                    {inventoryData.topMoving?.data?.length > 0 ? (
+                       <>
                        <SimpleBarChart 
-                        data={inventoryData.topMoving.map(item => ({
+                        data={inventoryData.topMoving.data.map(item => ({
                           label: item.inventory?.item_name || 'Unknown',
                           total: parseFloat(item.total_quantity)
                         }))} 
                         color="#3b82f6" 
                       />
+                      <InterpretationPanel report={inventoryData.topMoving} />
+                      </>
                     ) : (
                       <div className="h-[200px] flex items-center justify-center text-slate-400 font-medium">No consumption data available</div>
                     )}
@@ -525,7 +600,7 @@ function ReportsPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/50">
-                          {inventoryData.movements.map((move, i) => (
+                          {inventoryData.movements?.data?.map((move, i) => (
                             <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition-colors">
                               <td className="px-8 py-4">
                                 <p className="text-sm font-bold text-slate-800 dark:text-zinc-100">{move.inventory?.item_name || 'Deleted Item'}</p>
@@ -595,8 +670,8 @@ function ReportsPage() {
                       <h4 className="text-sm font-black text-slate-800 dark:text-zinc-50 uppercase tracking-[0.2em]">Expiration Watchlist</h4>
                     </div>
                     <div className="p-2">
-                       {inventoryData.expiringSoon.length > 0 ? (
-                         inventoryData.expiringSoon.map((item, i) => (
+                       {inventoryData.expiringSoon?.data?.length > 0 ? (
+                         inventoryData.expiringSoon.data.map((item, i) => (
                            <div key={i} className="flex items-center gap-4 p-4 rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors">
                               <div className="h-10 w-10 shrink-0 rounded-xl bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center">
                                  <FiIcons.FiBox className="text-orange-500 h-5 w-5" />
