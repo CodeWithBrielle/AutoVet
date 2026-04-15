@@ -6,7 +6,7 @@ import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import { getUserAvatarUrl } from "../../utils/userImages";
 
-function TopHeader({ title, user, searchPlaceholder = "Search patients, records...", onMenuToggle }) {
+function TopHeader({ title, user, clinic, searchPlaceholder = "Search patients, records...", onMenuToggle }) {
   const toast = useToast();
   const [openProfileMenu, setOpenProfileMenu] = useState(false);
   const menuRef = useRef(null);
@@ -41,6 +41,14 @@ function TopHeader({ title, user, searchPlaceholder = "Search patients, records.
           >
             <FiMenu className="h-5 w-5" />
           </button>
+          
+          {/* Mobile Logo */}
+          <div className="flex items-center gap-2 md:hidden">
+            {clinic?.logo && (
+              <img src={clinic.logo} alt="Logo" className="h-8 w-8 object-contain" />
+            )}
+          </div>
+
           <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-3xl">{title}</h1>
         </div>
 

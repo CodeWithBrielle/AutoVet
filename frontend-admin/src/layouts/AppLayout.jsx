@@ -101,6 +101,7 @@ function AppLayout() {
         <TopHeader
           title={pageTitle}
           user={user}
+          clinic={clinic}
           onMenuToggle={() => setIsSidebarOpen((prev) => !prev)}
         />
 
