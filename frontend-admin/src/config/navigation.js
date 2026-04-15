@@ -6,9 +6,10 @@ import {
   FiPackage,
   FiSettings,
   FiBarChart2,
+  FiMail,
 } from "react-icons/fi";
 import { LuPawPrint } from "react-icons/lu";
-import { ROLES, ALL_ROLES, ADMIN_ONLY } from "../constants/roles";
+import { ROLES, ALL_ROLES, FULL_ACCESS_ROLES } from "../constants/roles";
 import logo from "../assets/logo.png";
 
 export const primaryNavigation = [
@@ -17,11 +18,12 @@ export const primaryNavigation = [
   { id: "appointments", label: "Appointments", path: "/appointments", icon: FiClipboard, allowedRoles: ALL_ROLES },
   { id: "inventory", label: "Inventory", path: "/inventory", icon: FiPackage, badge: "AI", allowedRoles: ALL_ROLES },
   { id: "invoices", label: "Invoices", path: "/invoices", icon: FiCreditCard, allowedRoles: ALL_ROLES },
-  { id: "reports", label: "Reports", path: "/reports", icon: FiBarChart2, allowedRoles: ADMIN_ONLY },
+  { id: "reports", label: "Reports", path: "/reports", icon: FiBarChart2, allowedRoles: FULL_ACCESS_ROLES },
+  { id: "sent-notifications", label: "Sent Notifications", path: "/client-notifications", icon: FiMail, allowedRoles: ALL_ROLES },
 ];
 
 export const bottomNavigation = [
-  { id: "maintenance", label: "Maintenance", path: "/settings", icon: FiSettings, allowedRoles: ADMIN_ONLY },
+  { id: "maintenance", label: "Maintenance", path: "/settings", icon: FiSettings, allowedRoles: FULL_ACCESS_ROLES },
 ];
 
 export const clinicInfo = {

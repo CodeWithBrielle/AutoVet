@@ -9,6 +9,74 @@ use App\Models\ServicePrice;
 class PricingService
 {
     /**
+     * Generate a complete billing breakdown for a service.
+     */
+    public function generateBillingBreakdown(Service $service, ?Pet $pet = null, float $quantity = 1, ?float $weight = null): array
+    {
+        $professionalFee = $this->calculatePrice($service, $pet, 1, null, $weight);
+        
+        $serviceLine = [
+            'name' => $service->name . " - Professional Fee",
+            'type' => 'service',
+            'line_type' => 'service',
+            'reference_type' => Service::class,
+            'reference_id' => $service->id,
+            'qty' => $quantity,
+            'unit_price' => $professionalFee,
+            'total' => $professionalFee * $quantity,
+            'is_billable' => true,
+        ];
+
+        $itemLines = [];
+        $subtotal = $serviceLine['total'];
+
+        // Add linked consumables/items
+        if ($service->auto_load_linked_items) {
+            $consumables = $service->consumables()->with('inventory')->get();
+            foreach ($consumables as $consumable) {
+                $unitPrice = $consumable->is_billable ? (float) ($consumable->inventory->selling_price ?? 0) : 0;
+                $lineQty = $consumable->quantity * $quantity;
+                $lineTotal = $unitPrice * $lineQty;
+
+                $itemLines[] = [
+                    'name' => $consumable->inventory->item_name ?? 'Unknown Item',
+                    'type' => 'item',
+                    'line_type' => 'item',
+                    'reference_type' => \App\Models\Inventory::class,
+                    'reference_id' => $consumable->inventory_id,
+                    'qty' => $lineQty,
+                    'unit_price' => $unitPrice,
+                    'total' => $lineTotal,
+                    'is_billable' => $consumable->is_billable,
+                    'metadata' => [
+                        'auto_loaded' => true,
+                        'is_required' => $consumable->is_required,
+                    ]
+                ];
+
+                if ($consumable->is_billable) {
+                    $subtotal += $lineTotal;
+                }
+            }
+        }
+
+        // Tax Calculation (Fixed 12% VAT as per current system requirement)
+        $taxRate = 12.00;
+        $taxAmount = round($subtotal * ($taxRate / 100), 2);
+        $grandTotal = $subtotal + $taxAmount;
+
+        return [
+            'professional_fee' => $professionalFee,
+            'service_line' => $serviceLine,
+            'item_lines' => $itemLines,
+            'subtotal' => $subtotal,
+            'tax_rate' => $taxRate,
+            'tax_amount' => $taxAmount,
+            'grand_total' => $grandTotal,
+        ];
+    }
+
+    /**
      * Calculate the price for a service given a pet.
      */
     public function calculatePrice(Service $service, ?Pet $pet = null, float $quantity = 1, ?float $manualPrice = null, ?float $weight = null): float
@@ -18,42 +86,22 @@ class PricingService
         }
 
         if ($service->pricing_type === 'fixed') {
-            return ($service->base_price ?? $service->price ?? 0) * $quantity;
+            return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
         }
 
-        if ($service->pricing_type === 'size_based' && isset($pet)) {
-            $petSizeId = $pet->size_category_id;
-            
-            if ($petSizeId) {
-                $rule = $service->pricingRules()
-                    ->where('basis_type', 'size')
-                    ->where('reference_id', $petSizeId)
-                    ->first();
-                
-                if ($rule) {
-                    return (float) $rule->price * $quantity;
-                }
+        if ($service->pricing_type === 'weight_based') {
+            $effectiveWeight = $weight ?? ($pet ? $pet->weight : null);
+
+            if ($effectiveWeight === null) {
+                $petName = $pet ? $pet->name : "this pet";
+                throw new \Exception("Weight data is missing for {$petName}. Record clinical weight to resolve price.");
             }
 
-            // Fallback for legacy size_class
-            if ($pet->size_class) {
-                $priceRecord = $service->sizePrices()
-                    ->where('size_class', $pet->size_class)
-                    ->first();
-                if ($priceRecord) {
-                    return (float) $priceRecord->price * $quantity;
-                }
+            if (!$pet) {
+                 throw new \Exception("Pet profile data is required to resolve weight-based pricing.");
             }
 
-            throw new \Exception("No pricing rule configured for service '{$service->name}' for pet size.");
-        }
-
-        if ($service->pricing_type === 'weight_based' && isset($pet)) {
-            $petWeight = $weight ?? (float) $pet->weight;
-            
-            if ($petWeight === null || $petWeight <= 0) {
-                throw new \Exception("Pet weight is required for weight-based service '{$service->name}'.");
-            }
+            $petWeight = (float) $effectiveWeight;
             
             $range = \App\Models\WeightRange::where('status', 'Active')
                 ->where('species_id', $pet->species_id)
@@ -64,23 +112,25 @@ class PricingService
                 })
                 ->first();
 
-            if ($range && $range->size_category_id) {
-                $rule = $service->pricingRules()
-                    ->where('basis_type', 'size')
-                    ->where('reference_id', $range->size_category_id)
-                    ->first();
-                
-                if ($rule) {
-                    return (float) $rule->price * $quantity;
-                }
+            if (!$range) {
+                $speciesName = $pet->species->name ?? 'this species';
+                throw new \Exception("No weight bracket configured for {$speciesName} at {$petWeight} " . ($pet->weight_unit ?? 'kg') . ".");
             }
 
-            throw new \Exception("No pricing rule configured for weight '{$petWeight}kg' (Species: {$pet->species_id}) for service '{$service->name}'.");
+            $rule = $service->pricingRules()
+                ->where('basis_type', 'weight')
+                ->where('reference_id', $range->id)
+                ->first();
+            
+            if (!$rule) {
+                throw new \Exception("Price not set for {$service->name} in the '{$range->label}' bracket.");
+            }
+
+            return (float) $rule->price * $quantity;
         }
 
-        // Final fallback: Use base_price or legacy price
-        $finalPrice = ($service->base_price ?? $service->price ?? 0);
-        return (float) $finalPrice * $quantity;
+        // Final fallback: Use professional_fee or legacy price
+        return ($service->professional_fee ?? $service->price ?? 0) * $quantity;
     }
 
     /**
@@ -92,9 +142,12 @@ class PricingService
             return true;
         }
 
-        $expectedPrice = $this->calculatePrice($service, $pet);
-        
-        // Allow for minor floating point differences if any, or strict equality
-        return abs($expectedPrice - $submittedUnitPrice) < 0.01;
+        try {
+            $expectedPrice = $this->calculatePrice($service, $pet);
+            // Allow for minor floating point differences if any, or strict equality
+            return abs($expectedPrice - $submittedUnitPrice) < 0.01;
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 }

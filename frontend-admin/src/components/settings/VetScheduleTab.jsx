@@ -1,8 +1,9 @@
 import clsx from "clsx";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { FiPlus, FiTrash2, FiClock } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 
 const DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -23,45 +24,55 @@ export default function VetScheduleTab() {
   const [isAvailable, setIsAvailable] = useState(true);
   const [isOverwriting, setIsOverwriting] = useState(false);
 
-  const fetchData = async () => {
+  const hasFetchedRef = useRef(false);
+
+  const fetchData = useCallback(async (isMountedRef) => {
     if (!user?.token) return;
+    
+    // Show loading only on first fetch to prevent UX flickering
+    if (!hasFetchedRef.current) setLoading(true);
+
     try {
-      const headers = { 
-        "Accept": "application/json",
-        "Authorization": `Bearer ${user.token}`
-      };
       const [usersRes, schedulesRes] = await Promise.all([
-        fetch("/api/users", { headers }),
-        fetch("/api/vet-schedules", { headers })
+        api.get("/api/users"),
+        api.get("/api/vet-schedules")
       ]);
-      if (usersRes.ok && schedulesRes.ok) {
-        const usersData = await usersRes.json();
-        const schedulesData = await schedulesRes.json();
-        
-        // Filter out non-vet users
-        const vetsOnly = usersData.filter(u => {
-          if (!u.role) return false;
-          const r = u.role.toLowerCase();
-          return r.includes("vet") || r.includes("doctor");
-        });
-        
-        setUsers(vetsOnly);
-        setSchedules(schedulesData);
-        if (vetsOnly.length > 0 && !selectedVetId) {
-          setSelectedVetId(vetsOnly[0].id.toString());
-        }
+      
+      if (!isMountedRef.current) return;
+
+      const usersData = usersRes.data;
+      const schedulesData = schedulesRes.data;
+      
+      // Filter out non-vet users
+      const vetsOnly = Array.isArray(usersData) ? usersData.filter(u => {
+        if (!u.role) return false;
+        const r = u.role.toLowerCase();
+        return r.includes("vet") || r.includes("doctor");
+      }) : [];
+      
+      setUsers(vetsOnly);
+      setSchedules(Array.isArray(schedulesData) ? schedulesData : []);
+      hasFetchedRef.current = true;
+      
+      if (vetsOnly.length > 0 && !selectedVetId) {
+        setSelectedVetId(vetsOnly[0].id.toString());
       }
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to load schedule data.");
+      if (!isMountedRef.current) return;
+      console.error("[VetScheduleTab] fetch error:", err);
+      toast.error("Unable to refresh schedules. Using last available data.");
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
-  };
+  }, [user?.token]);
 
   useEffect(() => {
-    fetchData();
-  }, [user?.token]);
+    const isMountedRef = { current: true };
+    fetchData(isMountedRef);
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [fetchData]);
 
   const toggleDay = (day) => {
     setSelectedDays(prev => 
@@ -91,55 +102,40 @@ export default function VetScheduleTab() {
     };
 
     try {
-      const res = await fetch("/api/vet-schedules/bulk", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json", 
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify(payload)
-      });
-      
-      const data = await res.json();
+      const res = await api.post("/api/vet-schedules/bulk", payload);
+      const data = res.data;
 
-      if (res.ok) {
-        toast.success(data.message || "Schedules saved.");
-        setBreakStart("");
-        setBreakEnd("");
-        fetchData();
-        setIsOverwriting(false);
-      } else if (res.status === 409) {
+      toast.success(data.message || "Schedules saved.");
+      setBreakStart("");
+      setBreakEnd("");
+      
+      // Pass a dummy ref for internal call
+      fetchData({ current: true });
+      setIsOverwriting(false);
+    } catch (err) {
+      if (err.response?.status === 409) {
+        const data = err.response.data;
         const confirmOverwrite = window.confirm(
-          `Schedule conflict detected for: ${data.conflicting_days.join(", ")}. \n\nDo you want to overwrite existing schedules for these days?`
+          `Schedule conflict detected for: ${data.conflicting_days?.join(", ") || 'some days'}. \n\nDo you want to overwrite existing schedules for these days?`
         );
         if (confirmOverwrite) {
           handleSaveSchedule(null, true);
         }
       } else {
-        toast.error(data.message || "Failed to save schedule.");
+        console.error("[VetScheduleTab] save error:", err);
+        toast.error(err.response?.data?.message || "Failed to save schedule.");
       }
-    } catch (err) {
-      console.error(err);
-      toast.error("Network error.");
     }
   };
 
   const handleDeleteSchedule = async (id) => {
     if (!window.confirm("Remove this schedule?")) return;
     try {
-      const res = await fetch(`/api/vet-schedules/${id}`, { 
-        method: "DELETE",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        }
-      });
-      if (res.ok) {
-        toast.success("Schedule removed.");
-        fetchData();
-      }
-    } catch {
+      await api.delete(`/api/vet-schedules/${id}`);
+      toast.success("Schedule removed.");
+      fetchData({ current: true });
+    } catch (err) {
+      console.error("[VetScheduleTab] delete error:", err);
       toast.error("Failed to delete schedule.");
     }
   };

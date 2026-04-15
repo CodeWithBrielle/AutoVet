@@ -17,8 +17,9 @@ export const getActualPetImageUrl = (photoPath) => {
   if (!photoPath) return null;
   // Already an absolute URL (e.g., data: URI or a previously resolved http URL)
   if (photoPath.startsWith("http") || photoPath.startsWith("data:image")) return photoPath;
-  // Local Laravel storage path — served by the local backend, works offline
-  return `http://localhost:8000/storage/${photoPath}`;
+  // Resolve base URL from env so Vercel/production deployments point to the live backend
+  const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  return `${baseUrl}/storage/${photoPath}`;
 };
 
 /**

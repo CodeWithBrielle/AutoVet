@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Traits\Archivable;
 use App\Traits\HasAuditTrail;
 use App\Traits\HasSyncFields;
+use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
@@ -18,6 +19,7 @@ use App\Models\Breed;
 use App\Models\Appointment;
 use App\Models\MedicalRecord;
 use App\Models\Invoice;
+use App\Models\Notification;
 
 class Pet extends Model
 {
@@ -82,6 +84,19 @@ class Pet extends Model
             } else {
                 $pet->age_group = null;
             }
+        });
+
+        static::created(function ($pet) {
+            Notification::create([
+                'type' => 'PetAdded',
+                'title' => 'New Pet Added',
+                'message' => "{$pet->name} has been added to the system.",
+                'data' => [
+                    'pet_id' => $pet->id,
+                    'name' => $pet->name,
+                    'owner_id' => $pet->owner_id
+                ]
+            ]);
         });
     }
 

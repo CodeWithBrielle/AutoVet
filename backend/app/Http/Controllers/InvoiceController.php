@@ -8,9 +8,12 @@ use App\Services\InvoiceFinalizationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use App\Traits\StandardizesResponses;
+use App\Traits\ValidatesContext;
 
 class InvoiceController extends Controller
 {
+    use StandardizesResponses, ValidatesContext;
     protected $pricingService;
     protected $finalizationService;
     protected $clientNotificationService;
@@ -27,12 +30,40 @@ class InvoiceController extends Controller
     }
 
     /**
+     * Resolve billing breakdown for a specific service and pet.
+     */
+    public function resolveBreakdown(Request $request)
+    {
+        $validated = $request->validate([
+            'service_id' => 'required|exists:services,id',
+            'pet_id' => 'nullable|exists:pets,id',
+            'qty' => 'required|numeric|min:1',
+            'weight' => 'nullable|numeric|min:0',
+        ]);
+
+        $service = \App\Models\Service::findOrFail($validated['service_id']);
+        $pet = $validated['pet_id'] ? \App\Models\Pet::find($validated['pet_id']) : null;
+
+        try {
+            $breakdown = $this->pricingService->generateBillingBreakdown(
+                $service, 
+                $pet, 
+                (float) $validated['qty'], 
+                $validated['weight'] ? (float) $validated['weight'] : null
+            );
+            return response()->json($breakdown);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
      * Display a listing of invoices.
      */
     public function index()
     {
         $user = auth()->user();
-        $query = Invoice::with(['pet.species', 'pet.breed', 'items']);
+        $query = Invoice::with(['pet.species', 'pet.breed', 'items'])->orderBy('created_at', 'desc');
 
         if (method_exists($user, 'isOwner') && $user->isOwner()) {
             $query->whereHas('pet', function ($q) use ($user) {
@@ -40,8 +71,7 @@ class InvoiceController extends Controller
             });
         }
 
-        $invoices = $query->orderBy('created_at', 'desc')->get();
-        return response()->json($invoices);
+        return $this->successResponse($query->get());
     }
 
     /**
@@ -53,6 +83,7 @@ class InvoiceController extends Controller
 
         $validated = $request->validate([
             'pet_id' => 'required|exists:pets,id',
+            'owner_id' => 'required|exists:owners,id',
             'appointment_id' => 'required|exists:appointments,id',
             'pet_weight' => 'nullable|numeric|min:0.01',
             'status' => 'required|in:Draft,Finalized,Paid,Partially Paid,Cancelled',
@@ -66,13 +97,26 @@ class InvoiceController extends Controller
             'notes_to_client' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_type' => 'required|in:service,inventory',
+            'items.*.line_type' => 'nullable|in:service,item,adjustment',
             'items.*.name' => 'required|string',
             'items.*.notes' => 'nullable|string',
-            'items.*.qty' => 'required|integer|min:1',
+            'items.*.qty' => 'required|numeric|min:0.01',
             'items.*.unit_price' => 'required|numeric|min:0',
             'items.*.amount' => 'required|numeric|min:0',
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
+            'items.*.is_hidden' => 'sometimes|boolean',
+            'items.*.billing_behavior' => 'required|string|in:included,separately_billable,internal_only',
+            'items.*.source_type' => 'required|string|in:appointment_template,manual,custom',
+            'items.*.is_confirmed_used' => 'sometimes|boolean',
+            'items.*.is_removed_from_template' => 'sometimes|boolean',
+            'items.*.was_price_overridden' => 'sometimes|boolean',
+            'items.*.was_quantity_overridden' => 'sometimes|boolean',
+            'items.*.unit_price_snapshot' => 'nullable|numeric',
+            'items.*.line_total_snapshot' => 'nullable|numeric',
+            'items.*.metadata_snapshot' => 'nullable|array',
+            'items.*.client_id' => 'nullable|string',
+            'items.*.parent_invoice_id' => 'nullable|string',
         ]);
 
         if ($validated['discount_value'] > $validated['subtotal'] && $validated['discount_type'] === 'fixed') {
@@ -81,6 +125,31 @@ class InvoiceController extends Controller
         
         if ($validated['status'] === 'Finalized' && $validated['subtotal'] <= 0) {
             throw ValidationException::withMessages(['subtotal' => 'Cannot finalize an invoice with 0 subtotal.']);
+        }
+
+        // Hierarchy Enforcement: Ensure Pet-Appointment-Owner chain is intact
+        if (!$this->isPetOwnedBy($validated['pet_id'], $validated['owner_id'])) {
+            return $this->errorResponse(
+                'HIERARCHY_MISMATCH',
+                'relationship',
+                'The selected pet does not belong to the selected owner.',
+                ['owner_id' => ['Validation mismatch: Pet/Owner linking is incorrect.']],
+                422
+            );
+        }
+
+        if (!empty($validated['appointment_id'])) {
+            if (!$this->isAppointmentForPet($validated['appointment_id'], $validated['pet_id'])) {
+                return $this->errorResponse(
+                    'HIERARCHY_MISMATCH',
+                    'relationship',
+                    'This appointment belongs to a different pet.',
+                    ['appointment_id' => ['Validation failed: Appointment/Pet linking mismatch.']],
+                    422
+                );
+            }
+            
+            // Appointment-Owner check is implicit if isPetOwnedBy and isAppointmentForPet are true
         }
 
         DB::beginTransaction();
@@ -102,6 +171,7 @@ class InvoiceController extends Controller
             $itemsToCreate = [];
 
             foreach ($validated['items'] as $itemData) {
+                // Determine source-of-truth unit price and capture snapshot
                 if ($itemData['item_type'] === 'service') {
                     $service = \App\Models\Service::find($itemData['service_id']);
                     if ($service && $service->pricing_mode !== 'manual') {
@@ -111,34 +181,40 @@ class InvoiceController extends Controller
                              throw ValidationException::withMessages(['items' => $e->getMessage()]);
                         }
                     }
+                    $itemData['line_type'] = 'service';
+                    $itemData['reference_type'] = \App\Models\Service::class;
+                    $itemData['reference_id'] = $itemData['service_id'];
                 } else if ($itemData['item_type'] === 'inventory') {
                     $inventory = \App\Models\Inventory::find($itemData['inventory_id']);
                     if ($inventory) {
-                        // Use selling price as source of truth
                         $itemData['unit_price'] = (float) $inventory->selling_price;
                     }
+                    $itemData['line_type'] = 'item';
+                    $itemData['reference_type'] = \App\Models\Inventory::class;
+                    $itemData['reference_id'] = $itemData['inventory_id'];
                 }
 
-                $itemAmount = $itemData['unit_price'] * $itemData['qty'];
-                $calculatedSubtotal += $itemAmount;
-                $itemsToCreate[] = array_merge($itemData, ['amount' => $itemAmount, 'is_hidden' => false]);
-
-                // Auto-add consumables
-                if ($itemData['item_type'] === 'service' && $service) {
-                    $service->load('consumables');
-                    foreach ($service->consumables as $consumable) {
-                        $itemsToCreate[] = [
-                            'item_type' => 'inventory',
-                            'inventory_id' => $consumable->inventory_id,
-                            'name' => $consumable->inventory->item_name ?? "Consumable",
-                            'qty' => $consumable->quantity * $itemData['qty'],
-                            'unit_price' => 0,
-                            'amount' => 0,
-                            'is_hidden' => true,
-                            'notes' => "Linked consumable for {$service->name}"
-                        ];
-                    }
+                $isHidden = $itemData['is_hidden'] ?? false;
+                $billingBehavior = $itemData['billing_behavior'] ?? 'separately_billable';
+                
+                // Enforce 0 amount for internal_only and included items
+                if ($billingBehavior !== 'separately_billable' || $isHidden) {
+                    $itemAmount = 0;
+                } else {
+                    $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
                 }
+
+                $itemData['unit_price_snapshot'] = $itemData['unit_price'];
+                $itemData['line_total_snapshot'] = $itemAmount;
+
+                $isConfirmedUsed = $itemData['is_confirmed_used'] ?? true;
+                $isRemoved = $itemData['is_removed_from_template'] ?? false;
+
+                if ($isConfirmedUsed && !$isRemoved) {
+                    $calculatedSubtotal += $itemAmount;
+                }
+                
+                $itemsToCreate[] = $itemData;
             }
 
             // Recalculate total based on backend rules
@@ -167,8 +243,35 @@ class InvoiceController extends Controller
                 'notes_to_client' => $validated['notes_to_client'],
             ]);
 
-            foreach ($itemsToCreate as $item) {
-                $invoice->items()->create($item);
+            $clientIdToDbId = [];
+
+            // 1. Save top-level items (no parent_invoice_id)
+            $topLevelItems = array_filter($itemsToCreate, fn($i) => empty($i['parent_invoice_id']));
+            foreach ($topLevelItems as $itemData) {
+                $client_id = $itemData['client_id'] ?? null;
+                unset($itemData['client_id']); unset($itemData['parent_invoice_id']);
+                $model = $invoice->items()->create($itemData);
+                if ($client_id) {
+                    $clientIdToDbId[$client_id] = $model->id;
+                }
+            }
+
+            // 2. Save child items
+            $childItems = array_filter($itemsToCreate, fn($i) => !empty($i['parent_invoice_id']));
+            foreach ($childItems as $itemData) {
+                $client_id = $itemData['client_id'] ?? null;
+                $parent_client_id = $itemData['parent_invoice_id'];
+                
+                unset($itemData['client_id']); unset($itemData['parent_invoice_id']);
+                
+                if (isset($clientIdToDbId[$parent_client_id])) {
+                    $itemData['parent_id'] = $clientIdToDbId[$parent_client_id];
+                }
+                
+                $model = $invoice->items()->create($itemData);
+                if ($client_id) {
+                    $clientIdToDbId[$client_id] = $model->id;
+                }
             }
 
             $invoice->load('items');
@@ -180,9 +283,13 @@ class InvoiceController extends Controller
                     if ($owner) {
                         $this->clientNotificationService->sendFromTemplate(
                             $owner,
-                            'invoice_finalized',
+                            'invoice_ready',
                             'email',
-                            ['invoice_number' => $invoice->invoice_number, 'total' => $invoice->total],
+                            [
+                                'invoice_number' => $invoice->invoice_number,
+                                'total' => number_format($invoice->total, 2),
+                                'pet_name' => $invoice->pet->name ?? '',
+                            ],
                             'automated',
                             $invoice
                         );
@@ -193,17 +300,15 @@ class InvoiceController extends Controller
             }
 
             DB::commit();
-            return response()->json($invoice->load('pet', 'items'), 201);
+
+            return $this->successResponse($invoice->load(['pet.owner', 'appointment', 'items']), 'Invoice created successfully.', 201);
         } catch (\Exception $e) {
             DB::rollBack();
             \Illuminate\Support\Facades\Log::error("Invoice creation failed: " . $e->getMessage(), [
                 'stack' => $e->getTraceAsString(),
                 'payload' => $request->all()
             ]);
-            return response()->json([
-                'message' => 'Failed to create invoice.', 
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse('SAVE_FAILED', 'billing', 'Failed to create invoice.', [$e->getMessage()], 500);
         }
     }
 
@@ -227,6 +332,7 @@ class InvoiceController extends Controller
         $validated = $request->validate([
             'status' => 'required|in:Draft,Finalized,Paid,Partially Paid,Cancelled',
             'pet_weight' => 'nullable|numeric|min:0.01',
+            'owner_id' => 'nullable|exists:owners,id',
             'appointment_id' => 'nullable|exists:appointments,id',
             'subtotal' => 'required|numeric|min:0',
             'discount_type' => 'required|in:percentage,fixed',
@@ -246,17 +352,57 @@ class InvoiceController extends Controller
             'items.*.amount' => 'required_with:items|numeric|min:0',
             'items.*.service_id' => 'nullable|exists:services,id',
             'items.*.inventory_id' => 'nullable|exists:inventories,id',
+            'items.*.is_hidden' => 'sometimes|boolean',
+            'items.*.billing_behavior' => 'required_with:items|string|in:included,separately_billable,internal_only',
+            'items.*.source_type' => 'required_with:items|string|in:appointment_template,manual,custom',
+            'items.*.is_confirmed_used' => 'sometimes|boolean',
+            'items.*.is_removed_from_template' => 'sometimes|boolean',
+            'items.*.was_price_overridden' => 'sometimes|boolean',
+            'items.*.was_quantity_overridden' => 'sometimes|boolean',
+            'items.*.client_id' => 'nullable|string',
+            'items.*.parent_invoice_id' => 'nullable|string',
         ]);
 
-        if ($invoice->status === 'Finalized' && in_array($validated['status'], ['Draft', 'Finalized'])) {
-             // If already finalized, only allow payment updates
-             $invoice->update([
-                 'amount_paid' => $validated['amount_paid'],
-                 'payment_method' => $validated['payment_method'] ?? $invoice->payment_method,
-                 'appointment_id' => $validated['appointment_id'] ?? $invoice->appointment_id,
-                 'status' => $validated['status']
-             ]);
-             return response()->json($invoice->load('pet', 'items'));
+        if (!empty($validated['owner_id'])) {
+            if (!$this->isPetOwnedBy($invoice->pet_id, $validated['owner_id'])) {
+                return $this->errorResponse(
+                    'HIERARCHY_MISMATCH',
+                    'relationship',
+                    'The invoice pet does not belong to the provided owner.',
+                    ['owner_id' => ['Validation mismatch: Pet/Owner linking is incorrect.']],
+                    422
+                );
+            }
+        }
+
+        if (!empty($validated['appointment_id'])) {
+            if (!$this->isAppointmentForPet($validated['appointment_id'], $invoice->pet_id)) {
+                return $this->errorResponse(
+                    'HIERARCHY_MISMATCH',
+                    'relationship',
+                    'This appointment belongs to a different pet context.',
+                    ['appointment_id' => ['Validation failed: Appointment/Pet linking mismatch.']],
+                    422
+                );
+            }
+        }
+
+        // 1. Finalization & Cancellation Guard
+        if ($invoice->status === 'Finalized' || $invoice->status === 'Paid' || $invoice->status === 'Partially Paid') {
+            // If changing to Cancelled, we proceed but trigger reversal
+            if ($validated['status'] === 'Cancelled') {
+                // Keep moving to transaction block
+            } else {
+                // If already finalized, only allow status updates to Paid/Partially Paid and metadata updates. 
+                // NO ITEM EDITS ALLOWED.
+                $invoice->update([
+                    'amount_paid' => $validated['amount_paid'],
+                    'payment_method' => $validated['payment_method'] ?? $invoice->payment_method,
+                    'status' => $validated['status'],
+                    'notes_to_client' => $validated['notes_to_client'] ?? $invoice->notes_to_client,
+                ]);
+                return response()->json($invoice->load('pet', 'items'));
+            }
         }
 
         DB::beginTransaction();
@@ -271,9 +417,6 @@ class InvoiceController extends Controller
             }
 
             if (isset($validated['items'])) {
-                // Delete existing hidden items first to re-add them based on updated services
-                $invoice->items()->where('is_hidden', true)->delete();
-
                 foreach ($validated['items'] as $itemData) {
                     if ($itemData['item_type'] === 'service') {
                         $service = \App\Models\Service::find($itemData['service_id']);
@@ -284,33 +427,40 @@ class InvoiceController extends Controller
                                  throw ValidationException::withMessages(['items' => $e->getMessage()]);
                             }
                         }
+                        $itemData['line_type'] = 'service';
+                        $itemData['reference_type'] = \App\Models\Service::class;
+                        $itemData['reference_id'] = $itemData['service_id'];
                     } else if ($itemData['item_type'] === 'inventory') {
                         $inventory = \App\Models\Inventory::find($itemData['inventory_id']);
                         if ($inventory) {
                             $itemData['unit_price'] = (float) $inventory->selling_price;
                         }
+                        $itemData['line_type'] = 'item';
+                        $itemData['reference_type'] = \App\Models\Inventory::class;
+                        $itemData['reference_id'] = $itemData['inventory_id'];
                     }
 
-                    $itemAmount = $itemData['unit_price'] * $itemData['qty'];
-                    $calculatedSubtotal += $itemAmount;
-                    $itemsToUpdate[] = array_merge($itemData, ['amount' => $itemAmount, 'is_hidden' => false]);
-
-                    // Auto-add consumables
-                    if ($itemData['item_type'] === 'service' && $service) {
-                        $service->load('consumables');
-                        foreach ($service->consumables as $consumable) {
-                            $itemsToUpdate[] = [
-                                'item_type' => 'inventory',
-                                'inventory_id' => $consumable->inventory_id,
-                                'name' => $consumable->inventory->item_name ?? "Consumable",
-                                'qty' => $consumable->quantity * $itemData['qty'],
-                                'unit_price' => 0,
-                                'amount' => 0,
-                                'is_hidden' => true,
-                                'notes' => "Linked consumable for {$service->name}"
-                            ];
-                        }
+                    $isHidden = $itemData['is_hidden'] ?? false;
+                    $billingBehavior = $itemData['billing_behavior'] ?? 'separately_billable';
+                    
+                    // Enforce 0 amount for internal_only and included items
+                    if ($billingBehavior !== 'separately_billable' || $isHidden) {
+                        $itemAmount = 0;
+                    } else {
+                        $itemAmount = round($itemData['unit_price'] * $itemData['qty'], 2);
                     }
+
+                    $itemData['unit_price_snapshot'] = $itemData['unit_price'];
+                    $itemData['line_total_snapshot'] = $itemAmount;
+
+                    $isConfirmedUsed = $itemData['is_confirmed_used'] ?? true;
+                    $isRemoved = $itemData['is_removed_from_template'] ?? false;
+
+                    if ($isConfirmedUsed && !$isRemoved) {
+                        $calculatedSubtotal += $itemAmount;
+                    }
+                    
+                    $itemsToUpdate[] = $itemData;
                 }
             } else {
                 $calculatedSubtotal = $invoice->subtotal;
@@ -354,28 +504,66 @@ class InvoiceController extends Controller
                 // Delete items not in the updated list
                 $itemIds = collect($itemsToUpdate)->pluck('id')->filter()->toArray();
                 $invoice->items()->whereNotIn('id', $itemIds)->delete();
+                
+                $clientIdToDbId = [];
 
-                foreach ($itemsToUpdate as $itemData) {
+                // Pass 1: Update existing items & create top-level new items
+                foreach ($itemsToUpdate as &$itemData) {
+                    $client_id = $itemData['client_id'] ?? null;
                     if (isset($itemData['id'])) {
-                        $invoice->items()->where('id', $itemData['id'])->update($itemData);
-                    } else {
-                        $invoice->items()->create($itemData);
+                        $invoice->items()->where('id', $itemData['id'])->update(collect($itemData)->except(['id', 'client_id', 'parent_invoice_id'])->toArray());
+                        if ($client_id) $clientIdToDbId[$client_id] = $itemData['id'];
+                    } else if (empty($itemData['parent_invoice_id'])) {
+                        $dbItem = $invoice->items()->create(collect($itemData)->except(['client_id', 'parent_invoice_id'])->toArray());
+                        $itemData['id'] = $dbItem->id;
+                        if ($client_id) $clientIdToDbId[$client_id] = $dbItem->id;
+                    }
+                }
+                unset($itemData); // break reference
+
+                // Pass 2: Create new child items
+                foreach ($itemsToUpdate as $itemData) {
+                    if (!isset($itemData['id']) && !empty($itemData['parent_invoice_id'])) {
+                        $client_id = $itemData['client_id'] ?? null;
+                        $parent_client_id = $itemData['parent_invoice_id'];
+                        
+                        $createData = collect($itemData)->except(['client_id', 'parent_invoice_id'])->toArray();
+                        
+                        if (isset($clientIdToDbId[$parent_client_id])) {
+                            $createData['parent_id'] = $clientIdToDbId[$parent_client_id];
+                        }
+                        
+                        $dbItem = $invoice->items()->create($createData);
+                        if ($client_id) $clientIdToDbId[$client_id] = $dbItem->id;
                     }
                 }
             }
 
             $invoice->load('items');
-            $this->finalizationService->finalizeInvoice($invoice);
+            
+            // 3. Finalization / Reversal Trigger
+            if ($invoice->status === 'Finalized' || $invoice->status === 'Paid') {
+                $this->finalizationService->finalizeInvoice($invoice);
+            } else if ($invoice->status === 'Cancelled') {
+                $this->finalizationService->reverseStockDeduction($invoice);
+            }
 
-            if ($invoice->wasChanged('status') && $invoice->status === 'Finalized') {
+            // 4. Decoupled side effects: Notifications happen outside the transaction
+            DB::commit();
+
+            if ($invoice->wasChanged('status') && in_array($invoice->status, ['Finalized', 'Paid'])) {
                 try {
                     $owner = $invoice->pet->owner;
                     if ($owner) {
                         $this->clientNotificationService->sendFromTemplate(
                             $owner,
-                            'invoice_finalized',
+                            'invoice_ready',
                             'email',
-                            ['invoice_number' => $invoice->invoice_number, 'total' => $invoice->total],
+                            [
+                                'invoice_number' => $invoice->invoice_number,
+                                'total' => number_format($invoice->total, 2),
+                                'pet_name' => $invoice->pet->name ?? '',
+                            ],
                             'automated',
                             $invoice
                         );
@@ -385,11 +573,10 @@ class InvoiceController extends Controller
                 }
             }
 
-            DB::commit();
-            return response()->json($invoice->load('pet', 'items'));
+            return $this->successResponse($invoice->load(['pet.owner', 'appointment', 'items']), 'Invoice updated.');
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update invoice.', 'errors' => [$e->getMessage()]], 500);
+            return $this->errorResponse('UPDATE_FAILED', 'billing', 'Failed to update invoice.', [$e->getMessage()], 500);
         }
     }
 
@@ -398,6 +585,6 @@ class InvoiceController extends Controller
      */
     public function destroy(Invoice $invoice)
     {
-        return response()->json(['message' => 'Transactions cannot be deleted as per system policy.'], 403);
+        return $this->errorResponse('RESTRICTED_DELETION', 'policy', 'Transactions cannot be deleted as per system integrity policy. Use Cancellation instead.', [], 403);
     }
 }

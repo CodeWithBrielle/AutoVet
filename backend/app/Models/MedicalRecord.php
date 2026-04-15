@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Traits\Archivable;
 use App\Traits\HasAuditTrail;
 use App\Traits\HasSyncFields;
+use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 

@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class ServiceConsumable extends Model
 {
-    protected $fillable = ['service_id', 'inventory_id', 'quantity'];
+    protected $fillable = ['service_id', 'inventory_id', 'quantity', 'is_billable', 'is_required', 'auto_deduct', 'notes'];
 
     public function service()
     {

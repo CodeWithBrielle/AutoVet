@@ -1,0 +1,1115 @@
+{
+    "summary": {
+        "total_items": 29,
+        "active_items": 28,
+        "archived_items": 1,
+        "low_stock_items": 0,
+        "out_of_stock_items": 0,
+        "expiring_items": 24
+    },
+    "inconsistencies": [],
+    "data": [
+        {
+            "id": 12,
+            "item_name": "Nobivac DHPPi (MSD) \u2013 canine core combo vaccine",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-NOBI-001",
+            "description": null,
+            "stock_level": 200,
+            "unit": "N\/A",
+            "cost_price": "20.00",
+            "selling_price": "50.00",
+            "service_price": "50.00",
+            "reorder_level": 10,
+            "expiration_date": "2028-08-16",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:34:03",
+            "updated_at": "2026-04-12 15:42:59",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 200,
+                    "prev": 0,
+                    "new": 200,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:34:03",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 13,
+            "item_name": "Nobivac Rabies (MSD) \u2013 rabies vaccine",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-NOBI-002",
+            "description": null,
+            "stock_level": 200,
+            "unit": "N\/A",
+            "cost_price": "200.00",
+            "selling_price": "250.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2030-08-15",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:34:47",
+            "updated_at": "2026-04-09 17:34:50",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 200,
+                    "prev": 0,
+                    "new": 200,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:34:47",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 14,
+            "item_name": "Nobivac L4 (MSD) \u2013 leptospirosis vaccine",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-NOBI-003",
+            "description": null,
+            "stock_level": 200,
+            "unit": "N\/A",
+            "cost_price": "250.00",
+            "selling_price": "300.00",
+            "service_price": "0.00",
+            "reorder_level": 20,
+            "expiration_date": "2028-11-23",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:36:21",
+            "updated_at": "2026-04-09 17:34:43",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 200,
+                    "prev": 0,
+                    "new": 200,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:36:21",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 15,
+            "item_name": "Nobivac KC (MSD) \u2013 kennel cough (intranasal)",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-NOBI-004",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "300.00",
+            "selling_price": "350.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-07-26",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:37:05",
+            "updated_at": "2026-04-09 17:34:37",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:37:05",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 16,
+            "item_name": "Nobivac Tricat Trio (MSD) \u2013 feline core vaccine",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-NOBI-005",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "250.00",
+            "selling_price": "300.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-11-21",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:37:41",
+            "updated_at": "2026-04-09 17:34:29",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:37:41",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 17,
+            "item_name": "Synulox palatable tablets (Zoetis) \u2013 amoxicillin\/clavulanic acid",
+            "category": "Medicines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "MED-SYNU-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "45.00",
+            "selling_price": "90.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-06-20",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:38:31",
+            "updated_at": "2026-04-09 17:34:21",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:38:31",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 18,
+            "item_name": "Cerenia 16 mg tablets (maropitant)",
+            "category": "Medicines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "MED-CERE-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "150.00",
+            "selling_price": "200.00",
+            "service_price": "150.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-08-17",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:39:57",
+            "updated_at": "2026-04-10 02:04:17",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:39:57",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 19,
+            "item_name": "Metacam 1.5 mg\/ml oral suspension (meloxicam)",
+            "category": "Medicines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "MED-META-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "900.00",
+            "selling_price": "900.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-08-22",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:40:40",
+            "updated_at": "2026-04-09 17:34:07",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:40:41",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 22,
+            "item_name": "Zoletil (Virbac) \u2013 injectable anesthetic",
+            "category": "Medicines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "MED-ZOLE-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "500.00",
+            "selling_price": "550.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-07-26",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:44:31",
+            "updated_at": "2026-04-09 17:33:58",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:44:31",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 23,
+            "item_name": "NexGard Spectra",
+            "category": "Medicines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": false,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "MED-NEXG-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "250.00",
+            "selling_price": "500.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2026-04-08",
+            "status": "In Stock",
+            "is_archived": true,
+            "deleted_at": "2026-04-09 11:15:10",
+            "deleted_by": "Dr. Jake S. Medina",
+            "created_at": "2026-04-08 02:45:19",
+            "updated_at": "2026-04-09 11:15:10",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:45:19",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 24,
+            "item_name": "Syringe 1 mL (sterile)",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-SYRI-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "10.00",
+            "selling_price": "5.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-08-15",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:58:26",
+            "updated_at": "2026-04-09 17:30:58",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:58:26",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 25,
+            "item_name": "Syringe 3 mL (sterile)",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-SYRI-002",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "15.00",
+            "selling_price": "6.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-07-25",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 02:59:32",
+            "updated_at": "2026-04-09 17:31:07",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 02:59:32",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 26,
+            "item_name": "Needle 23G \/ 25G (sterile)",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-NEED-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "20.00",
+            "selling_price": "10.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2028-07-08",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 03:00:34",
+            "updated_at": "2026-04-09 17:32:01",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 03:00:34",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 27,
+            "item_name": "IV catheter (22G \/ 24G)",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-IVCA-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "0.00",
+            "selling_price": "50.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": null,
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 03:00:56",
+            "updated_at": "2026-04-08 03:00:56",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 03:00:56",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 28,
+            "item_name": "Disposable gloves (box, 100 pcs)",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-DISP-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "0.00",
+            "selling_price": "250.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": null,
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 03:01:28",
+            "updated_at": "2026-04-09 13:16:48",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 03:01:28",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 29,
+            "item_name": "Gauze pads (sterile packs)",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-GAUZ-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "150.00",
+            "selling_price": "5.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2028-06-13",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 03:02:10",
+            "updated_at": "2026-04-09 17:31:32",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 03:02:10",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 30,
+            "item_name": "Cotton balls \/ cotton rolls",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-COTT-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": "5.00",
+            "selling_price": "120.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-11-08",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 03:02:42",
+            "updated_at": "2026-04-09 17:30:01",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 03:02:42",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 31,
+            "item_name": "70% alcohol (500 mL \u2013 1L)",
+            "category": "Required Items",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "CON-70AL-001",
+            "description": null,
+            "stock_level": 100,
+            "unit": "N\/A",
+            "cost_price": null,
+            "selling_price": "180.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2030-12-25",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-08 03:03:23",
+            "updated_at": "2026-04-09 13:18:44",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 100,
+                    "prev": 0,
+                    "new": 100,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-08 03:03:23",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 32,
+            "item_name": "VetClean Anti-Tick & Flea Dog Shampoo 250ml",
+            "category": "Grooming Supplies",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "GEN-VETC-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "200.00",
+            "selling_price": "350.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2030-07-25",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 12:55:29",
+            "updated_at": "2026-04-09 12:55:29",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 12:55:29",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 33,
+            "item_name": "PetDerm Sensitive Skin Cat Shampoo 200ml",
+            "category": "Grooming Supplies",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "GEN-PETD-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "180.00",
+            "selling_price": "320.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2030-06-09",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 12:58:11",
+            "updated_at": "2026-04-09 12:58:11",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 12:58:11",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 34,
+            "item_name": "FungiCare Medicated Antifungal Shampoo 250ml",
+            "category": "Grooming Supplies",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "GEN-FUNG-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "280.00",
+            "selling_price": "450.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": null,
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 12:59:35",
+            "updated_at": "2026-04-09 12:59:35",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 12:59:35",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 35,
+            "item_name": "CoatSoft Pet Conditioner 200ml",
+            "category": "Grooming Supplies",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "GEN-COAT-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "170.00",
+            "selling_price": "300.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2029-06-14",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 13:00:09",
+            "updated_at": "2026-04-09 13:00:09",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 13:00:09",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 36,
+            "item_name": "FeshPaws Grooming Cologne (Baby Powder) 100ml",
+            "category": "Grooming Supplies",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "GEN-FESH-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "120.00",
+            "selling_price": "200.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2031-06-11",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 13:00:39",
+            "updated_at": "2026-04-09 13:00:39",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 13:00:39",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 37,
+            "item_name": "KnotFree Detangling Spray 150ml",
+            "category": "Grooming Supplies",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "GEN-KNOT-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "160.00",
+            "selling_price": "280.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": null,
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 13:01:25",
+            "updated_at": "2026-04-09 13:01:25",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 13:01:25",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 38,
+            "item_name": "Rabigen Anti-Rabies Vaccine 1ml (Canine\/Feline)",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-RABI-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "250.00",
+            "selling_price": "300.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2030-07-17",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 13:12:11",
+            "updated_at": "2026-04-09 17:33:42",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 13:12:11",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 39,
+            "item_name": "Vanguard Plus 5-in-1 Vaccine for Dogs 1 Dose",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-VANG-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "600.00",
+            "selling_price": "650.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2031-10-09",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 13:12:44",
+            "updated_at": "2026-04-09 17:33:34",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 13:12:44",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 40,
+            "item_name": "Vanguard Plus 6-in-1 Vaccine for Dogs 1 Dose",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-VANG-002",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "700.00",
+            "selling_price": "800.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2031-06-09",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 13:13:05",
+            "updated_at": "2026-04-09 17:33:12",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 13:13:05",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 41,
+            "item_name": "Felocell 4-in-1 Vaccine for Cats 1 Dose",
+            "category": "Vaccines",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": false,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "VAC-FELO-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "550.00",
+            "selling_price": "650.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2031-02-25",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 13:13:51",
+            "updated_at": "2026-04-09 17:33:25",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 13:13:51",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        },
+        {
+            "id": 42,
+            "item_name": "Drontal",
+            "category": "Preventive Care Supplies",
+            "brand": "N\/A",
+            "type": {
+                "is_sellable": true,
+                "is_service_usable": true,
+                "deduct_on_finalize": true
+            },
+            "sku_code": "GEN-DRON-001",
+            "description": null,
+            "stock_level": 20,
+            "unit": "N\/A",
+            "cost_price": "50.00",
+            "selling_price": "100.00",
+            "service_price": "0.00",
+            "reorder_level": 10,
+            "expiration_date": "2030-10-16",
+            "status": "In Stock",
+            "is_archived": false,
+            "deleted_at": null,
+            "deleted_by": null,
+            "created_at": "2026-04-09 17:29:11",
+            "updated_at": "2026-04-09 17:29:11",
+            "supplier": "Other",
+            "last_5_transactions": [
+                {
+                    "type": "Stock In",
+                    "qty": 20,
+                    "prev": 0,
+                    "new": 20,
+                    "remarks": "Initial Stock",
+                    "date": "2026-04-09 17:29:11",
+                    "user": "Dr. Jake S. Medina"
+                }
+            ]
+        }
+    ]
+}

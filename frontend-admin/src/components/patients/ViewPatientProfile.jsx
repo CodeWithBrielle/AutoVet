@@ -502,7 +502,7 @@ function ViewPatientProfile({ patient, onRefresh, isModal = false }) {
         </nav>
 
         <div className="p-6">
-          {activeTab === "overview" && <OverviewTab patient={patient} onOpenOwner={() => setSelectedOwnerId(patient.owner?.id)} />}
+          {activeTab === "overview" && <OverviewTab patient={patient} onOpenOwner={() => setSelectedOwnerId(patient.owner?.id)} isVet={isVet} isStaff={isStaff} />}
           {activeTab === "medical" && <MedicalRecordsTab patient={patient} isStaff={isStaff} isVet={isVet} />}
           {activeTab === "appointments" && <AppointmentsTab appointments={patient.appointments || []} />}
           {activeTab === "invoices" && <InvoiceTab invoices={patient.invoices || []} />}
@@ -561,7 +561,7 @@ function ViewPatientProfile({ patient, onRefresh, isModal = false }) {
 
 /* ──────────────── Overview Tab ──────────────── */
 
-function OverviewTab({ patient, onOpenOwner }) {
+function OverviewTab({ patient, onOpenOwner, isVet, isStaff }) {
   return (
     <div className="space-y-6">
       {/* Top grid: Photo + Quick stats */}
@@ -658,22 +658,36 @@ function OverviewTab({ patient, onOpenOwner }) {
         </div>
       </section>
 
-      {/* Download PDF */}
-      <div className="flex gap-3">
-        <button
-          onClick={() => generatePatientPDF(patient)}
-          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
-        >
-          <FiDownload className="h-4 w-4" />
-          Download Summary (PDF)
-        </button>
-        <button
-          onClick={() => navigate(`/appointments?patientId=${patient.id}`)}
-          className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-600 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/30 transition"
-        >
-          <FiCalendar className="h-4 w-4" />
-          Book Appointment
-        </button>
+      {/* Clinical Actions Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-white p-5 shadow-sm border border-zinc-200 dark:bg-dark-card dark:border-dark-border">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(`/appointments?petId=${patient.id}`)}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <FiCalendar className="h-4 w-4" />
+            Book Appointment
+          </button>
+          {(isVet || isStaff) && (
+            <button
+              onClick={() => navigate(`/invoices?petId=${patient.id}`)}
+              className="inline-flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-white px-6 py-3 text-sm font-bold text-emerald-600 hover:bg-emerald-50 dark:bg-dark-card dark:text-emerald-400 dark:border-emerald-500/50 dark:hover:bg-emerald-500/10 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <FiFileText className="h-4 w-4" />
+              Create Invoice
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => generatePatientPDF(patient)}
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-dark-border dark:bg-dark-surface dark:text-zinc-300 dark:hover:bg-zinc-800 transition shadow-sm"
+          >
+            <FiDownload className="h-4 w-4" />
+            Download Medical Summary
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1287,7 +1301,7 @@ function MedicalRecordModal({
                  )}
                >
                  <option value="">Select an appointment...</option>
-                 {appointments.map(apt => (
+                 {(appointments || []).map(apt => (
                    <option key={apt.id} value={apt.id}>
                      {formatDate(apt.date)} {apt.time?.substring(0, 5)} — {apt.service?.name || apt.title || "General Visit"}
                    </option>

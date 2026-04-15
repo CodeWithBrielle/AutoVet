@@ -71,17 +71,21 @@ class DashboardController extends Controller
 
         // Simple Linear Regression
         $n = count($xValues);
-        $sumX = array_sum($xValues);
-        $sumY = array_sum($yValues);
-        $sumXY = 0;
-        $sumX2 = 0;
-        for ($i = 0; $i < $n; $i++) {
-            $sumXY += ($xValues[$i] * $yValues[$i]);
-            $sumX2 += ($xValues[$i] * $xValues[$i]);
+        $m = 0; $b = 0;
+        if ($n > 1) {
+            $sumX = array_sum($xValues);
+            $sumY = array_sum($yValues);
+            $sumXY = $sumX2 = 0;
+            for ($i = 0; $i < $n; $i++) {
+                $sumXY += ($xValues[$i] * $yValues[$i]);
+                $sumX2 += ($xValues[$i] * $xValues[$i]);
+            }
+            $denominator = ($n * $sumX2) - ($sumX * $sumX);
+            $m = ($denominator != 0) ? (($n * $sumXY) - ($sumX * $sumY)) / $denominator : 0;
+            $b = ($n != 0) ? ($sumY - ($m * $sumX)) / $n : 0;
+        } elseif ($n == 1) {
+            $b = $yValues[0];
         }
-        $denominator = ($n * $sumX2) - ($sumX * $sumX);
-        $m = ($denominator != 0) ? (($n * $sumXY) - ($sumX * $sumY)) / $denominator : 0;
-        $b = ($n != 0) ? ($sumY - ($m * $sumX)) / $n : 0;
 
         $forecast = max(0, round(($m * $n) + $b, 1));
         $months[] = $now->copy()->addMonths(1)->format('M');
@@ -95,14 +99,16 @@ class DashboardController extends Controller
                 $growth = (($curr - $prev) / $prev) * 100;
             }
         }
-        $growthLabel = ($growth >= 0 ? '+' : '') . round($growth, 1) . '% vs last month';
+        $growthLabel = ($growth != 0 ? ($growth >= 0 ? '+' : '') . round($growth, 1) . '% vs last month' : 'No change');
 
         $stockoutWarning = '';
         if ($item->stock_level < $forecast && $forecast > 0) {
             $daysLeft = max(1, round(($item->stock_level / $forecast) * 30));
             $stockoutWarning = " Based on the next month's forecasted usage of {$forecast} units, {$item->item_name} is projected to run out in approximately {$daysLeft} days.";
         } else {
-            $stockoutWarning = " Current stock level is sufficient to meet the forecasted usage of {$forecast} units for next month.";
+            $stockoutWarning = $forecast > 0 
+                ? " Current stock level is sufficient to meet the forecasted usage of {$forecast} units for next month."
+                : " Insufficient historical data to project specific stockout risk.";
         }
 
         return response()->json([
@@ -110,7 +116,7 @@ class DashboardController extends Controller
             'recommended_stock' => $item->min_stock_level * 2,
             'current_stock' => $item->stock_level,
             'growth_label' => $growthLabel,
-            'analysis' => "Analyzed the last 6 months of sales data." . $stockoutWarning,
+            'analysis' => ($n >= 2 ? "Analyzed the last {$n} months of sales data." : "Monitoring initial sales data.") . $stockoutWarning,
             'chart_data' => [
                 'months' => $months,
                 'usage' => $usage,
@@ -120,177 +126,108 @@ class DashboardController extends Controller
     }
 
     /**
-     * Get AI planning hints for appointments.
+     * Get AI planning hints for appointments with peak detection.
      */
     public function getAppointmentForecast()
     {
-        // Get last 8 weeks of appointment counts grouped by week number
-        // Used as training data for linear regression
-        $weeklyData = [];
-        for ($i = 7; $i >= 0; $i--) {
-            $weekStart = now()->startOfWeek()->subWeeks($i);
-            $weekEnd = $weekStart->copy()->endOfWeek();
-            $count = \App\Models\Appointment::whereBetween('date', [
-                $weekStart->toDateString(),
-                $weekEnd->toDateString()
-            ])->count();
-            $weeklyData[] = $count;
+        $last7Days = Appointment::whereBetween('date', [now()->subDays(7)->toDateString(), now()->toDateString()])->count();
+        $next7Days = Appointment::whereBetween('date', [now()->addDay()->toDateString(), now()->addDays(8)->toDateString()])->count();
+
+        $percentChange = $last7Days > 0 ? (($next7Days - $last7Days) / $last7Days) * 100 : ($next7Days > 0 ? 100 : 0);
+        $trendDirection = $next7Days >= $last7Days ? 'increase' : 'decrease';
+
+        // Peak Day Detection
+        $peakDayQuery = Appointment::select(DB::raw('DAYNAME(date) as day_name'), DB::raw('COUNT(*) as count'))
+            ->groupBy('day_name')
+            ->orderBy('count', 'desc')
+            ->first();
+        $peakDay = $peakDayQuery ? $peakDayQuery->day_name : 'N/A';
+
+        // Busiest Hours Detection
+        $peakHourQuery = Appointment::select(DB::raw('HOUR(time) as hour'), DB::raw('COUNT(*) as count'))
+            ->groupBy('hour')
+            ->orderBy('count', 'desc')
+            ->first();
+        $peakHour = $peakHourQuery ? $peakHourQuery->hour : null;
+
+        $peakHourLabel = 'N/A';
+        if ($peakHour !== null) {
+            if ($peakHour == 0) $peakHourLabel = "12 AM";
+            elseif ($peakHour == 12) $peakHourLabel = "12 PM";
+            elseif ($peakHour > 12) $peakHourLabel = ($peakHour - 12) . " PM";
+            else $peakHourLabel = $peakHour . " AM";
         }
 
-        // Linear Regression on weekly appointment counts (x = week index, y = count)
-        $n = count($weeklyData);
-        $xValues = range(0, $n - 1);
-        $yValues = $weeklyData;
-        $sumX = array_sum($xValues);
-        $sumY = array_sum($yValues);
-        $sumXY = 0; $sumX2 = 0;
-        for ($i = 0; $i < $n; $i++) {
-            $sumXY += $xValues[$i] * $yValues[$i];
-            $sumX2 += $xValues[$i] * $xValues[$i];
-        }
-        $denom = ($n * $sumX2) - ($sumX * $sumX);
-        $m = $denom != 0 ? (($n * $sumXY) - ($sumX * $sumY)) / $denom : 0;
-        $b = ($sumY - ($m * $sumX)) / $n;
+        $interpretation = "";
+        $label_mode = 'overview';
+        $recommendations = [];
+        $confidence_note = "";
 
-        // R² for appointment model
-        $meanY = $sumY / $n;
-        $ssTot = array_sum(array_map(fn($y) => pow($y - $meanY, 2), $yValues));
-        $ssRes = 0;
-        for ($i = 0; $i < $n; $i++) {
-            $ssRes += pow($yValues[$i] - ($m * $xValues[$i] + $b), 2);
-        }
-        $r2 = $ssTot > 0 ? round(1 - ($ssRes / $ssTot), 4) : 0;
+        $recordCount = $last7Days + $next7Days;
+        $pastAppts = Appointment::whereNotIn('status', ['Cancelled', 'No Show'])
+             ->where('date', '>=', now()->subDays(14))
+             ->where('date', '<', now()->toDateString())
+             ->count();
 
-        // Forecast next 2 weeks
-        $forecastNext1 = max(0, round($m * $n + $b));
-        $forecastNext2 = max(0, round($m * ($n + 1) + $b));
+        if ($recordCount < 2) {
+             $label_mode = "overview";
+             $interpretation = "";
+             $recommendations = [];
+             $confidence_note = "Forecast unavailable: insufficient historical data ({$pastAppts} records max).";
+        } else {
+            $label_mode = 'ai';
+            $interpretation = "A " . abs(round($percentChange)) . "% " . $trendDirection . " trend in appointments is expected next week relative to the trailing 7 days. ";
+            if ($peakDay !== 'N/A') {
+                $interpretation .= "Historical pattern shows " . $peakDay . "s are your busiest days, with a peak around " . $peakHourLabel . ".";
+            }
 
-        // Build week labels for chart (last 8 weeks + 2 forecast weeks)
-        $weekLabels = [];
-        for ($i = 7; $i >= 0; $i--) {
-            $weekLabels[] = 'W' . now()->startOfWeek()->subWeeks($i)->format('M d');
-        }
-        $weekLabels[] = 'Next wk';
-        $weekLabels[] = 'Wk +2';
-
-        $chartData = array_merge($weeklyData, [$forecastNext1, $forecastNext2]);
-
-        // Per-day appointment counts for the current + next 7 days (for bar chart)
-        $days = [];
-        for ($i = 0; $i < 7; $i++) {
-            $date = now()->addDays($i);
-            $count = \App\Models\Appointment::whereDate('date', $date->toDateString())->count();
-            $days[] = [
-                'label' => $date->format('D'),
-                'date'  => $date->toDateString(),
-                'count' => $count,
-            ];
+            if ($next7Days > ($last7Days * 1.2)) {
+                $recommendations[] = "Appointment volume is rising. Consider adding a relief vet or extending morning hours.";
+            }
+            if ($peakDay !== 'N/A') {
+                $recommendations[] = "Ensure full staffing on " . $peakDay . "s to handle the historical peak volume.";
+            }
+            if ($pastAppts > 20) {
+                $confidence_note = "Forecast generated from {$pastAppts} records over 14 days. Reliable confidence based on stable dataset.";
+            } else {
+                $confidence_note = "Forecast generated from {$pastAppts} records over 14 days. Limited accuracy due to small dataset.";
+            }
         }
 
-        // Insight text from regression
-        $lastWeekCount = $weeklyData[count($weeklyData) - 1];
-        $insight = 'Clinic appointment volume is stable. Standard operations recommended.';
-        if ($m > 1) {
-            $pct = round(($forecastNext1 - max(1, $lastWeekCount)) / max(1, $lastWeekCount) * 100);
-            $insight = "Appointments are trending upward. Model projects {$forecastNext1} appointments next week" . ($pct > 0 ? " (+{$pct}% vs this week)." : '.');
-        } elseif ($m < -1) {
-            $insight = "Appointment volume is trending downward. Consider sending client reminders to fill the schedule.";
-        }
-
-        // Hints
-        $hints = [];
-        if ($forecastNext1 > $lastWeekCount * 1.2) {
-            $hints[] = "Consider scheduling additional staff or extending hours next week.";
-        }
         $overdueFollowups = \App\Models\MedicalRecord::whereNotNull('follow_up_date')
             ->where('follow_up_date', '<', now()->toDateString())
+            ->whereHas('appointment', function($q) { $q->whereNotIn('status', ['Cancelled', 'No Show']); })
             ->count();
-        if ($overdueFollowups > 0) {
-            $hints[] = "There are {$overdueFollowups} overdue patient follow-ups. Assign staff to contact owners.";
+        if ($overdueFollowups > 5) {
+            $recommendations[] = "You have {$overdueFollowups} overdue follow-ups. Assign staff to call owners during slow hours.";
         }
-        $lowStock = \App\Models\Inventory::whereColumn('stock_level', '<=', 'min_stock_level')->count();
-        if ($lowStock > 0) {
-            $hints[] = "Refill {$lowStock} low-stock items before busy appointment days.";
-        }
-        if (empty($hints)) {
-            $hints[] = "No critical warnings. Clinic is operating normally.";
+
+        if (empty($recommendations) && $label_mode === 'ai') {
+            $recommendations[] = "Maintain current staffing levels. Operations generally align with recent patterns.";
         }
 
         return response()->json([
-            'insight'         => $insight,
-            'hints'           => $hints,
-            'model'           => [
-                'slope'            => round($m, 4),
-                'intercept'        => round($b, 4),
-                'r2'               => $r2,
-                'forecast_week_1'  => $forecastNext1,
-                'forecast_week_2'  => $forecastNext2,
-                'algorithm'        => 'Simple Linear Regression',
+            'success' => true,
+            'label_mode' => $label_mode,
+            'data' => [
+                'next_7_days' => $next7Days,
+                'last_7_days' => $last7Days,
+                'peak_day' => $peakDay,
+                'peak_hour' => $peakHourLabel,
+                'trend_direction' => $trendDirection
             ],
-            'weekly_chart'    => [
-                'labels' => $weekLabels,
-                'data'   => $chartData,
+            'interpretation' => $interpretation,
+            'recommendations' => $recommendations,
+            'anomaly' => [
+                'detected' => false,
+                'explanation' => ''
             ],
-            'daily_next7'     => $days,
+            'data_basis' => "Comparing past 7 days vs next 7 days, bounded to local timezone. Excludes cancelled/no-show statuses.",
+            'confidence_note' => $confidence_note,
+            'notable_findings' => ($label_mode === 'ai' && abs($percentChange) > 40 && $recordCount > 5) ? ["Unexpected " . abs(round($percentChange)) . "% swing in booking volume detected."] : []
         ]);
     }
 
-    public function getPatientVisitPredictions()
-    {
-        // Overdue follow-ups: follow_up_date is in the past, load pet + owner
-        $overdue = \App\Models\MedicalRecord::with(['pet.owner'])
-            ->whereNotNull('follow_up_date')
-            ->where('follow_up_date', '<', now()->toDateString())
-            ->orderBy('follow_up_date', 'asc')
-            ->limit(10)
-            ->get();
-
-        // Upcoming follow-ups: follow_up_date within next 30 days
-        $upcoming = \App\Models\MedicalRecord::with(['pet.owner'])
-            ->whereNotNull('follow_up_date')
-            ->whereBetween('follow_up_date', [now()->toDateString(), now()->addDays(30)->toDateString()])
-            ->orderBy('follow_up_date', 'asc')
-            ->limit(10)
-            ->get();
-
-        $formatRecord = function ($record, $tone) {
-            $daysAgo = now()->diffInDays($record->follow_up_date, false);
-            if ($tone === 'danger') {
-                $statusLabel = abs((int)$daysAgo) . 'd overdue';
-            } else {
-                $statusLabel = (int)$daysAgo . 'd away';
-            }
-            return [
-                'pet'          => $record->pet->name ?? 'Unknown',
-                'owner'        => $record->pet->owner->last_name ?? ($record->pet->owner->name ?? 'Unknown'),
-                'follow_up'    => $record->follow_up_date?->toDateString(),
-                'status_label' => $statusLabel,
-                'tone'         => $tone,
-                'diagnosis'    => $record->diagnosis ?? null,
-            ];
-        };
-
-        $results = [];
-        foreach ($overdue as $r)  { $results[] = $formatRecord($r, 'danger'); }
-        foreach ($upcoming as $r) {
-            $days = now()->diffInDays($r->follow_up_date, false);
-            $tone = $days <= 5 ? 'warning' : ($days <= 14 ? 'info' : 'success');
-            $results[] = $formatRecord($r, $tone);
-        }
-
-        $totalOverdue = \App\Models\MedicalRecord::whereNotNull('follow_up_date')
-            ->where('follow_up_date', '<', now()->toDateString())
-            ->count();
-
-        return response()->json([
-            'patients'      => $results,
-            'total_overdue' => $totalOverdue,
-            'total_upcoming'=> $upcoming->count(),
-            'summary'       => $totalOverdue > 0
-                ? "{$totalOverdue} pets are overdue for follow-up visits."
-                : "No overdue follow-ups. All patients are on schedule.",
-        ]);
-    }
 
     /**
      * Get overall dashboard statistics.
@@ -299,18 +236,18 @@ class DashboardController extends Controller
     {
         $totalPets = Pet::count();
         $totalOwners = \App\Models\Owner::count();
-        $monthlyRevenue = Invoice::whereIn('status', ['Finalized', 'Paid', 'Partially Paid'])
+        $monthlyRevenue = Invoice::realized()
             ->whereMonth('created_at', now()->month)
             ->whereYear('created_at', now()->year)
             ->sum('total');
         
         $pendingAppointments = Appointment::where('date', '>=', now()->toDateString())->count();
         
-        // Low stock count
-        $lowStockItems = Inventory::whereColumn('stock_level', '<=', 'min_stock_level')->count();
+        // Low stock count (inclusive alert)
+        $lowStockItems = Inventory::lowStock()->count();
 
         // Calculate revenue growth
-        $lastMonthRevenue = Invoice::whereIn('status', ['Finalized', 'Paid', 'Partially Paid'])
+        $lastMonthRevenue = Invoice::realized()
             ->whereMonth('created_at', now()->subMonth()->month)
             ->whereYear('created_at', now()->subMonth()->year)
             ->sum('total');
@@ -320,16 +257,20 @@ class DashboardController extends Controller
             $revenueGrowth = (($monthlyRevenue - $lastMonthRevenue) / $lastMonthRevenue) * 100;
         }
 
+        $newPetsThisWeek = Pet::whereDate('created_at', '>=', now()->subDays(7))->count();
+        $newClientsThisWeek = \App\Models\Owner::whereDate('created_at', '>=', now()->subDays(7))->count();
+        $appointmentsToday = Appointment::whereDate('date', now()->toDateString())->count();
+
         return response()->json([
             [
                 'id' => 'stat-1',
                 'title' => 'Total Pets',
                 'value' => number_format($totalPets),
-                'detail' => 'Active patients in care',
+                'detail' => 'Active pets in care',
                 'iconName' => 'FiHeart',
                 'iconBg' => 'bg-blue-100 dark:bg-blue-900/30',
                 'iconColor' => 'text-blue-600 dark:text-blue-400',
-                'badge' => '+' . Pet::whereDate('created_at', '>=', now()->subDays(7))->count() . ' this week',
+                'badge' => '+' . $newPetsThisWeek . ' this week',
                 'badgeTone' => 'success',
             ],
             [
@@ -340,15 +281,15 @@ class DashboardController extends Controller
                 'iconName' => 'FiUsers',
                 'iconBg' => 'bg-purple-100 dark:bg-purple-900/30',
                 'iconColor' => 'text-purple-600 dark:text-purple-400',
-                'badge' => '+' . \App\Models\Owner::whereDate('created_at', '>=', now()->subDays(7))->count() . ' this week',
+                'badge' => '+' . $newClientsThisWeek . ' this week',
                 'badgeTone' => 'success',
             ],
             [
                 'id' => 'stat-2',
                 'title' => 'Monthly Revenue',
                 'value' => '₱' . number_format($monthlyRevenue, 0),
-                'detail' => 'Gross income this month',
-                'iconName' => 'FiTrendingUp',
+                'detail' => 'Realized income this month',
+                'iconName' => 'FiDollarSign',
                 'iconBg' => 'bg-emerald-100 dark:bg-emerald-900/30',
                 'iconColor' => 'text-emerald-600 dark:text-emerald-400',
                 'badge' => round($revenueGrowth, 1) . '% from last month',
@@ -362,7 +303,7 @@ class DashboardController extends Controller
                 'iconName' => 'FiCalendar',
                 'iconBg' => 'bg-indigo-100 dark:bg-indigo-900/30',
                 'iconColor' => 'text-indigo-600 dark:text-indigo-400',
-                'badge' => Appointment::whereDate('date', now()->toDateString())->count() . ' today',
+                'badge' => $appointmentsToday . ' today',
                 'badgeTone' => 'info',
             ],
             [
@@ -381,12 +322,35 @@ class DashboardController extends Controller
     }
 
     /**
-     * Get inventory consumption data with AI forecast.
+     * Get inventory consumption data with AI forecast and depletion analysis.
      */
     public function getInventoryConsumption(Request $request)
     {
-        $monthsToFetch = $request->query('range', 6) == 'Year' ? 12 : 6;
-        $futureMonths = 2;
+        try {
+            $rawRange = $request->query('range', '6_months');
+            
+            $rangeMap = [
+                '1_month' => 1,
+                '3_months' => 3,
+                '6_months' => 6,
+                '12_months' => 12,
+                // Backward compatibility mapping
+                '1 Month' => 1,
+                '3 Months' => 3,
+                '6 Months' => 6,
+                '12 Months' => 12,
+                'Year' => 12,
+            ];
+
+            if (!array_key_exists($rawRange, $rangeMap)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid range requested.'
+                ], 422);
+            }
+
+            $monthsToFetch = $rangeMap[$rawRange];
+            $futureMonths = 2;
 
         $timeline = [];
         $now = Carbon::now()->startOfMonth();
@@ -399,9 +363,8 @@ class DashboardController extends Controller
             $timeline[] = ['date' => $now->copy()->addMonths($i), 'is_future' => true];
         }
 
-        // Fetch actual inventory usage (quantity from invoice items)
         $usage = InvoiceItem::whereHas('invoice', function($q) {
-                $q->whereIn('status', ['Finalized', 'Paid', 'Partially Paid']);
+                $q->realized();
             })
             ->select(
                 DB::raw('YEAR(created_at) as year'),
@@ -418,63 +381,139 @@ class DashboardController extends Controller
             $actualData[$key] = (float) $u->total_qty;
         }
 
-        // Removed baseline mock data
-        $baseline = [];
-
-        // Linear Regression
         $xValues = [];
         $yValues = [];
         foreach ($timeline as $index => $item) {
             if (!$item['is_future']) {
                 $key = $item['date']->format('Y-m');
-                $monthNum = $item['date']->format('m');
-                
-                // Use real data if exists, otherwise fallback to baseline pattern
-                $val = $actualData[$key] ?? ($baseline[$monthNum] ?? 0);
-                
+                $val = $actualData[$key] ?? 0;
                 $xValues[] = $index;
                 $yValues[] = $val;
             }
         }
 
+        // Regression
         $n = count($xValues);
-        $sumX = array_sum($xValues);
-        $sumY = array_sum($yValues);
-        $sumXY = 0;
-        $sumX2 = 0;
-        for ($i = 0; $i < $n; $i++) {
-            $sumXY += ($xValues[$i] * $yValues[$i]);
-            $sumX2 += ($xValues[$i] * $xValues[$i]);
+        $m = 0; $b = 0;
+        if ($n > 1) {
+            $sumX = array_sum($xValues);
+            $sumY = array_sum($yValues);
+            $sumXY = $sumX2 = 0;
+            for ($i = 0; $i < $n; $i++) {
+                $sumXY += ($xValues[$i] * $yValues[$i]);
+                $sumX2 += ($xValues[$i] * $xValues[$i]);
+            }
+            $denominator = ($n * $sumX2) - ($sumX * $sumX);
+            $m = ($denominator != 0) ? (($n * $sumXY) - ($sumX * $sumY)) / $denominator : 0;
+            $b = ($n != 0) ? ($sumY - ($m * $sumX)) / $n : 0;
+        } elseif ($n == 1) {
+            $b = $yValues[0];
         }
-        $denominator = ($n * $sumX2) - ($sumX * $sumX);
-        $m = ($denominator != 0) ? (($n * $sumXY) - ($sumX * $sumY)) / $denominator : 0;
-        $b = ($n != 0) ? ($sumY - ($m * $sumX)) / $n : 0;
 
-        $results = [];
+        $chartResults = [];
         foreach ($timeline as $index => $item) {
-            $key = $item['date']->format('Y-m');
             $forecastValue = max(0, ($m * $index) + $b);
+            $key = $item['date']->format('Y-m');
+            $chartResults[] = [
+                'month' => $item['date']->format('M'),
+                'actual' => $item['is_future'] ? null : ($actualData[$key] ?? 0),
+                'forecast' => round($forecastValue, 1)
+            ];
+        }
 
-            if ($item['is_future']) {
-                $results[] = [
-                    'month' => $item['date']->format('M'),
-                    'actual' => null,
-                    'forecast' => round($forecastValue, 1)
-                ];
+        // --- Intelligence Layer ---
+        $currentMonthKey = $now->format('Y-m');
+        $currentVal = $actualData[$currentMonthKey] ?? 0;
+        $prevMonthKey = $now->copy()->subMonth()->format('Y-m');
+        $prevVal = $actualData[$prevMonthKey] ?? 0;
+        
+        $percentChange = null;
+        if ($prevVal > 0) {
+            $percentChange = (($currentVal - $prevVal) / $prevVal) * 100;
+        }
+        
+        $label_mode = 'ai';
+        $interpretation = "";
+        $confidence_note = "";
+        $recommendations = [];
+
+        $inventoryRecords = InvoiceItem::whereHas('invoice', function($q) { $q->realized(); })
+            ->where('created_at', '>=', now()->subMonths(12))
+            ->count();
+
+        if ($n < 2) {
+            $label_mode = 'overview';
+            $interpretation = "";
+            $confidence_note = "Forecast unavailable: insufficient historical data ({$inventoryRecords} records). Minimum 2 months required.";
+        } else {
+            if (is_null($percentChange)) {
+                 $interpretation = "No prior period data to establish a valid comparative trend.";
             } else {
-                $monthNum = $item['date']->format('m');
-                $val = $actualData[$key] ?? ($baseline[$monthNum] ?? 0);
-
-                $results[] = [
-                    'month' => $item['date']->format('M'),
-                    'actual' => $val,
-                    'forecast' => round($forecastValue, 1)
-                ];
+                 $interpretation = "Inventory consumption exhibits a " . ($percentChange >= 0 ? "rising" : "declining") . " trend, changing by " . abs(round($percentChange, 1)) . "% this month compared to the previous month.";
+            }
+            if ($inventoryRecords > 50) {
+                $confidence_note = "Forecast generated from {$inventoryRecords} consumption records over {$monthsToFetch} months. Reliable trend based on stable dataset.";
+            } else {
+                $confidence_note = "Forecast generated from {$inventoryRecords} consumption records over {$monthsToFetch} months. Limited accuracy due to small dataset.";
             }
         }
 
-        return response()->json($results);
+        // Anomaly Detection
+        $notable_findings = [];
+        $avgUsage = $n > 0 ? array_sum($yValues) / $n : 0;
+        if ($avgUsage > 0 && $currentVal > ($avgUsage * 1.5)) {
+            $notable_findings[] = "A significant spike in inventory usage was detected recently, exceeding the average by over 50%.";
+        }
+
+        // Recommendations & Depletion Logic
+        $recommendations = [];
+        $lowStockItems = Inventory::where('stock_level', '<=', DB::raw('min_stock_level'))->limit(3)->get();
+        foreach ($lowStockItems as $item) {
+            // Simple DCR for this specific item (past 30 days)
+            $itemUsage30 = InvoiceItem::where('inventory_id', $item->id)
+                ->whereHas('invoice', function($q) { $q->realized(); })
+                ->where('created_at', '>=', now()->subDays(30))
+                ->sum('qty');
+            
+            $dcr = $itemUsage30 / 30;
+            
+            if ($item->stock_level <= 0) {
+                $recommendations[] = "OUT OF STOCK: [{$item->item_name}] is depleted. Restock immediately to resume related services.";
+            } elseif ($item->stock_level <= $item->min_stock_level) {
+                $recommendations[] = "Low stock alert: [{$item->item_name}] is below minimum level. Consider reordering soon.";
+            }
+        }
+
+        if (empty($recommendations) && $label_mode === 'ai') {
+            $recommendations[] = "Stock levels are currently healthy. No immediate reorders required.";
+        }
+
+        return response()->json([
+            'success' => true,
+            'range' => strtolower($monthsToFetch . '_months'),
+            'label_mode' => $label_mode,
+            'data' => $chartResults,
+            'interpretation' => $interpretation,
+            'recommendations' => $recommendations,
+            'notable_findings' => $label_mode === 'ai' ? $notable_findings : [],
+            'data_basis' => $n >= 2 ? "Based on 30-day DCR and linear regression on completed invoices from " . $startMonth->format('M Y') . " to " . $now->format('M Y') . "." : "Monitoring initial consumption rates.",
+            'confidence_note' => $confidence_note
+        ]);
+        
+        } catch (\Exception $e) {
+            \Log::error('Inventory Consumption Analytics Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while generating inventory analytics. Please check parameters or try again later.',
+                'label_mode' => 'overview',
+                'data' => []
+            ], 500);
+        }
     }
+
 
     /**
      * Get recent notifications.
@@ -498,18 +537,12 @@ class DashboardController extends Controller
 
             if ($notif->type === 'LowStockAlert' || $notif->type === 'StockAdjustment') {
                 $iconName = ($notif->type === 'LowStockAlert') ? 'FiAlertTriangle' : 'FiPackage';
-                $tone = ($notif->type === 'LowStockAlert' || (isset($notif->data['quantity']) && $notif->data['quantity'] < 0)) ? 'danger' : 'success';
-                
-                // Fine-tune tone for StockAdjustment based on message if data is not explicit
+                $tone = 'danger';
                 if ($notif->type === 'StockAdjustment') {
-                    if (str_contains($notif->message, 'decreased') || str_contains($notif->message, 'deducted')) {
-                        $tone = 'danger';
-                    } else {
-                        $tone = 'success';
-                    }
+                    $tone = (str_contains($notif->message, 'decreased') || str_contains($notif->message, 'deducted')) ? 'danger' : 'success';
                 }
-            } elseif (str_contains($notif->type, 'Patient')) {
-                $iconName = 'FiPlusCircle';
+            } elseif (str_contains($notif->type, 'Pet') || $notif->type === 'PetAdded') {
+                $iconName = 'FiHeart';
                 $tone = 'success';
             } elseif (str_contains($notif->type, 'Appointment')) {
                 $iconName = 'FiCalendar';
@@ -519,6 +552,9 @@ class DashboardController extends Controller
             } elseif ($notif->type === 'InvoiceFinalized') {
                 $iconName = 'FiFileText';
                 $tone = 'success';
+            } elseif ($notif->type === 'OwnerRegistered' || $notif->type === 'ClientCommunication') {
+                $iconName = 'FiUser';
+                $tone = 'info';
             }
 
             $notifications[] = [
@@ -526,9 +562,9 @@ class DashboardController extends Controller
                 'db_id' => $notif->id,
                 'iconName' => $iconName,
                 'tone' => $tone,
-                'title' => $notif->title,
-                'message' => $notif->message,
-                'time' => $notif->created_at->diffForHumans()
+                'title' => $notif->title ?? 'Notification',
+                'message' => $notif->message ?? '',
+                'time' => $notif->created_at ? $notif->created_at->diffForHumans() : 'Just now'
             ];
         }
 
@@ -569,35 +605,25 @@ class DashboardController extends Controller
     }
 
     /**
-     * Get AI Sales Forecast using Simple Linear Regression.
+     * Get AI Sales Forecast using Simple Linear Regression and detect anomalies.
      */
     public function getSalesForecast(Request $request)
     {
         $monthsToFetch = $request->query('range', 6) == 'Year' ? 12 : 6;
-        $futureMonths = 2; // Predict next 2 months
+        $futureMonths = 2;
 
-        // Generate the last N months and next 2 months for the timeline
         $timeline = [];
         $now = Carbon::now()->startOfMonth();
-        
         $startMonth = $now->copy()->subMonths($monthsToFetch - 1);
         
         for ($i = 0; $i < $monthsToFetch; $i++) {
-            $timeline[] = [
-                'date' => $startMonth->copy()->addMonths($i),
-                'is_future' => false
-            ];
+            $timeline[] = ['date' => $startMonth->copy()->addMonths($i), 'is_future' => false];
         }
-        
         for ($i = 1; $i <= $futureMonths; $i++) {
-            $timeline[] = [
-                'date' => $now->copy()->addMonths($i),
-                'is_future' => true
-            ];
+            $timeline[] = ['date' => $now->copy()->addMonths($i), 'is_future' => true];
         }
 
-        // Fetch actual revenue data grouped by month
-        $invoices = Invoice::whereIn('status', ['Finalized', 'Paid', 'Partially Paid'])
+        $invoices = Invoice::realized()
             ->where('created_at', '>=', $startMonth)
             ->select(
                 DB::raw('YEAR(created_at) as year'),
@@ -605,8 +631,8 @@ class DashboardController extends Controller
                 DB::raw('SUM(total) as total_revenue')
             )
             ->groupBy('year', 'month')
-            ->orderBy('year')
-            ->orderBy('month')
+            ->orderBy('year', 'asc')
+            ->orderBy('month', 'asc')
             ->get();
 
         $actualData = [];
@@ -615,151 +641,124 @@ class DashboardController extends Controller
             $actualData[$key] = (float) $inv->total_revenue;
         }
 
-        // Removed baseline mock data
-        $baseline = [];
-
-        // Prepare data for Linear Regression
         $xValues = [];
         $yValues = [];
-        $n = 0;
-
         foreach ($timeline as $index => $item) {
             if (!$item['is_future']) {
                 $key = $item['date']->format('Y-m');
-                $monthNum = $item['date']->format('m');
-
-                // Use real data if exists, otherwise fallback to baseline pattern
-                $val = $actualData[$key] ?? ($baseline[$monthNum] ?? 0);
-                
+                $val = $actualData[$key] ?? 0;
                 $xValues[] = $index;
                 $yValues[] = $val;
-                $n++;
             }
         }
 
-        // Not enough data to run regression meaningfully
-        if ($n < 2) {
-            return response()->json([
-                'data' => [],
-                'model' => null,
-                'insights' => [
-                    ['type' => 'info', 'text' => 'Not enough invoice data yet to run the forecast model. Record at least 2 months of sales to activate AI forecasting.']
-                ],
-            ]);
+        // Regression
+        $n = count($xValues);
+        $m = 0; $b = 0;
+        if ($n > 1) {
+            $sumX = array_sum($xValues);
+            $sumY = array_sum($yValues);
+            $sumXY = $sumX2 = 0;
+            for ($i = 0; $i < $n; $i++) {
+                $sumXY += ($xValues[$i] * $yValues[$i]);
+                $sumX2 += ($xValues[$i] * $xValues[$i]);
+            }
+            $denominator = ($n * $sumX2) - ($sumX * $sumX);
+            $m = ($denominator != 0) ? (($n * $sumXY) - ($sumX * $sumY)) / $denominator : 0;
+            $b = ($n != 0) ? ($sumY - ($m * $sumX)) / $n : 0;
+        } elseif ($n == 1) {
+            $b = $yValues[0];
         }
 
-        // Simple Linear Regression: y = mx + b
-        $sumX = array_sum($xValues);
-        $sumY = array_sum($yValues);
-        
-        $sumXY = 0;
-        $sumX2 = 0;
-        
-        for ($i = 0; $i < $n; $i++) {
-            $sumXY += ($xValues[$i] * $yValues[$i]);
-            $sumX2 += ($xValues[$i] * $xValues[$i]);
-        }
-
-        $denominator = ($n * $sumX2) - ($sumX * $sumX);
-        
-        // If denominator is 0 (e.g., only 1 data point), m = 0
-        $m = ($denominator != 0) ? (($n * $sumXY) - ($sumX * $sumY)) / $denominator : 0;
-        $b = ($n != 0) ? ($sumY - ($m * $sumX)) / $n : 0;
-
-        // 1. R² calculation
-        $meanY = $n > 0 ? $sumY / $n : 0;
-        $ssTot = 0;
-        foreach ($yValues as $y) {
-            $ssTot += ($y - $meanY) ** 2;
-        }
-        $ssRes = 0;
-        for ($i = 0; $i < $n; $i++) {
-            $ssRes += ($yValues[$i] - ($m * $xValues[$i] + $b)) ** 2;
-        }
-        $r2 = ($ssTot > 0) ? round(1 - ($ssRes / $ssTot), 4) : 0;
-
-        // 2. Standard error for confidence band
-        $standardError = ($n > 2) ? round(sqrt($ssRes / ($n - 2)), 2) : 0;
-        $confidenceMargin = round($standardError * 1.5, 2);
-
-        // 3. Next month forecast value
-        $nextMonthForecast = round(max(0, ($m * $n) + $b), 2);
-
-        // 4. AI Insights array
-        $aiInsights = [];
-        if ($m > 0) {
-            $aiInsights[] = ['type' => 'success', 'text' => "Revenue is growing at +₱" . number_format(round($m), 0) . "/month. The model projects ₱" . number_format($nextMonthForecast, 0) . " next month."];
-        } elseif ($m < 0) {
-            $aiInsights[] = ['type' => 'warning', 'text' => "Revenue shows a declining trend of ₱" . number_format(abs(round($m)), 0) . "/month. Review pricing or service volume."];
-        } else {
-            $aiInsights[] = ['type' => 'info', 'text' => "Revenue trend is flat. The model needs more monthly data points to detect a growth direction."];
-        }
-
-        if ($r2 >= 0.75) {
-            $aiInsights[] = ['type' => 'success', 'text' => "Model confidence is strong (R²=" . $r2 . "). The forecast is based on consistent historical patterns."];
-        } elseif ($r2 >= 0.4) {
-            $aiInsights[] = ['type' => 'warning', 'text' => "Model confidence is moderate (R²=" . $r2 . "). Forecast accuracy improves with more historical invoice data."];
-        } else {
-            $trainingNote = $n < 4 
-                ? " The model is training on only {$n} month(s) of data — accuracy improves automatically as more invoices are recorded."
-                : " Consider checking for unusual revenue spikes that may be affecting the trend.";
-            $aiInsights[] = ['type' => 'warning', 'text' => "Model is still learning (R²=" . $r2 . ").{$trainingNote}"];
-        }
-
-        $lowStock = \App\Models\Inventory::whereColumn('stock_level', '<=', 'min_stock_level')->count();
-        if ($lowStock > 0) {
-            $aiInsights[] = ['type' => 'danger', 'text' => $lowStock . " inventory items are critically low. Restock before peak appointment days."];
-        }
-
-        $overdueFollowups = \App\Models\MedicalRecord::whereNotNull('follow_up_date')->where('follow_up_date', '<', now()->toDateString())->count();
-        if ($overdueFollowups > 0) {
-            $aiInsights[] = ['type' => 'info', 'text' => $overdueFollowups . " pets are overdue for follow-up visits. Auto-reminders can be sent from the Notifications module."];
-        }
-
-        // Construct final data structure
-        $results = [];
-        
+        $chartResults = [];
         foreach ($timeline as $index => $item) {
+            $forecastValue = max(0, ($m * $index) + $b);
             $key = $item['date']->format('Y-m');
-            $monthLabel = $item['date']->format('M');
-            
-            $forecastValue = ($m * $index) + $b;
-            // Ensure forecast is not negative
-            if ($forecastValue < 0) {
-                $forecastValue = 0;
-            }
+            $chartResults[] = [
+                'month' => $item['date']->format('M'),
+                'actual' => $item['is_future'] ? null : ($actualData[$key] ?? 0),
+                'forecast' => round($forecastValue, 2)
+            ];
+        }
+        // Interpretation Logic
+        $currentMonthKey = $now->format('Y-m');
+        $prevMonthKey = $now->copy()->subMonth()->format('Y-m');
+        $currentVal = $actualData[$currentMonthKey] ?? 0;
+        $prevVal = $actualData[$prevMonthKey] ?? 0;
+        $percentChange = null;
+        if ($prevVal > 0) {
+            $percentChange = (($currentVal - $prevVal) / $prevVal) * 100;
+        }
 
-            if ($item['is_future']) {
-                $results[] = [
-                    'month' => $monthLabel,
-                    'actual' => null,
-                    'forecast' => round($forecastValue, 2)
-                ];
+        $label_mode = 'ai';
+        $interpretation = "";
+        $confidence_note = "";
+        $recommendations = [];
+
+        $invoiceCount = Invoice::realized()->where('created_at', '>=', $startMonth)->count();
+
+        if ($n < 2) {
+            $label_mode = 'overview';
+            $interpretation = "";
+            $confidence_note = "Forecast unavailable: insufficient historical data ({$invoiceCount} records). Minimum 2 months required.";
+        } else {
+            if (is_null($percentChange)) {
+                 $interpretation = "No prior period data to establish a valid comparative trend.";
             } else {
-                $monthNum = $item['date']->format('m');
-                $val = $actualData[$key] ?? ($baseline[$monthNum] ?? 0);
-                
-                $results[] = [
-                    'month' => $monthLabel,
-                    'actual' => $val,
-                    'forecast' => round($forecastValue, 2)
-                ];
+                 $interpretation = "Revenue exhibits a " . ($percentChange >= 0 ? "rising" : "declining") . " trend, changing by " . abs(round($percentChange, 1)) . "% this month compared to the previous month.";
             }
+            
+            if ($invoiceCount > 30) {
+                $confidence_note = "Forecast generated from {$invoiceCount} localized records over {$monthsToFetch} months. Reliable trend based on stable dataset.";
+            } else {
+                $confidence_note = "Forecast generated from {$invoiceCount} records over {$monthsToFetch} months. Limited accuracy due to small dataset.";
+            }
+        }
+
+        // Anomaly Detection
+        $notable_findings = [];
+        $avgPast3Months = 0;
+        if ($n >= 3) {
+            $pastValues = array_slice($yValues, -4, 3);
+            if (!empty($pastValues)) {
+                $avgPast3Months = array_sum($pastValues) / count($pastValues);
+            }
+        }
+
+        if ($avgPast3Months > 0) {
+            $deviation = (($currentVal - $avgPast3Months) / $avgPast3Months) * 100;
+            if (abs($deviation) > 35) {
+                $type = $deviation > 0 ? 'spike' : 'drop';
+                $notable_findings[] = "A sudden " . abs(round($deviation)) . "% " . $type . " was detected relative to the 3-month rolling average.";
+            }
+        }
+
+        // Recommendations
+        if ($n >= 2) {
+            if (!is_null($percentChange) && $percentChange > 15) {
+                $recommendations[] = "Revenue density is increasing. Consider auditing service slot availability to maximize throughput.";
+            } elseif (!is_null($percentChange) && $percentChange < -15) {
+                $recommendations[] = "Transaction volume is pacing slower. Review pending follow-ups for reactivation campaigns.";
+            }
+        }
+
+        if (!empty($notable_findings) && $label_mode === 'ai') {
+            $recommendations[] = "Investigate the root cause of the recent revenue anomaly to proactively manage cashflow.";
+        }
+
+        if (empty($recommendations) && $label_mode === 'ai') {
+            $recommendations[] = "Revenue patterns appear stable. Continue standard retention operations.";
         }
 
         return response()->json([
-            'data' => $results,
-            'model' => [
-                'slope' => round($m, 2),
-                'intercept' => round($b, 2),
-                'r2' => $r2,
-                'standard_error' => $standardError,
-                'confidence_margin' => $confidenceMargin,
-                'training_months' => $n,
-                'next_month_forecast' => $nextMonthForecast,
-                'algorithm' => 'Simple Linear Regression',
-            ],
-            'insights' => $aiInsights,
+            'success' => true,
+            'label_mode' => $label_mode,
+            'data' => $chartResults,
+            'interpretation' => $interpretation,
+            'recommendations' => $recommendations,
+            'notable_findings' => $label_mode === 'ai' ? $notable_findings : [],
+            'data_basis' => $n >= 2 ? "Linear trend projection based on realized revenue from " . $startMonth->format('M Y') . " to " . $now->format('M Y') . "." : "Monitoring finalized transactions.",
+            'confidence_note' => $confidence_note
         ]);
     }
 }

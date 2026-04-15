@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Enums\Roles;
 use App\Models\MedicalRecord;
 use Illuminate\Http\Request;
+use App\Traits\StandardizesResponses;
+use App\Traits\ValidatesContext;
 
 /**
  * MedicalRecordController
@@ -15,6 +17,8 @@ use Illuminate\Http\Request;
  */
 class MedicalRecordController extends Controller
 {
+    use StandardizesResponses, ValidatesContext;
+
     protected $clientNotificationService;
 
     public function __construct(
@@ -37,7 +41,7 @@ class MedicalRecordController extends Controller
             $query->where('pet_id', $request->pet_id);
         }
 
-        return response()->json($query->orderBy('created_at', 'desc')->get());
+        return $this->successResponse($query->orderBy('created_at', 'desc')->get());
     }
 
     public function store(Request $request)
@@ -53,7 +57,31 @@ class MedicalRecordController extends Controller
             'notes'           => 'nullable|string',
             'follow_up_date'  => 'nullable|date',
             'follow_up_time'  => 'nullable',
+            'owner_id'        => 'required|exists:owners,id',
         ]);
+
+        // Hierarchy Enforcement: Ensure Pet-Appointment-Owner chain is intact
+        if (!$this->isAppointmentForPet($validated['appointment_id'], $validated['pet_id'])) {
+            return $this->errorResponse(
+                'HIERARCHY_MISMATCH',
+                'relationship',
+                'Hierarchy Mismatch: The selected pet does not match the appointment record.',
+                ['pet_id' => ['Validation failed: Pet/Appointment linking mismatch.']],
+                422
+            );
+        }
+
+        if (!$this->isPetOwnedBy($validated['pet_id'], $validated['owner_id'])) {
+            return $this->errorResponse(
+                'HIERARCHY_MISMATCH',
+                'relationship',
+                'Hierarchy Mismatch: The selected pet does not belong to the provided owner record.',
+                ['owner_id' => ['Validation failed: Owner/Pet linking mismatch.']],
+                422
+            );
+        }
+
+        $appt = \App\Models\Appointment::find($validated['appointment_id']);
 
         // Auto-assign the logged-in user as vet if they are a clinical role
         if (empty($validated['vet_id']) && auth()->check()) {
@@ -64,19 +92,35 @@ class MedicalRecordController extends Controller
             }
         }
 
-        $record = MedicalRecord::create($validated);
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        try {
+            // Create record (excluding owner_id from mass-assignment as it's not a model field)
+            $record = MedicalRecord::create(collect($validated)->except('owner_id')->toArray());
+            
+            // 2. Atomic Visit Update: Mark appointment as complete when treatment is recorded
+            $appt->update(['status' => 'completed']);
 
+            \Illuminate\Support\Facades\DB::commit();
+            return $this->successResponse($record->load(['pet', 'vet']), 'Treatment record saved.', 201);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
+            return $this->errorResponse('SAVE_FAILED', 'clinical', 'Failed to save treatment record: Internal clinical state error.', [$e->getMessage()], 500);
+        }
+
+        // 3. Decoupled side effects: Notifications happen outside the transaction
         try {
             $record->load('pet.owner');
             $owner = $record->pet->owner;
             if ($owner) {
+                $clinicName = \App\Models\Setting::where('key', 'clinic_name')->value('value') ?? 'Our Clinic';
                 $this->clientNotificationService->sendFromTemplate(
                     $owner,
                     'medical_summary_notice',
                     'email',
                     [
                         'pet_name' => $record->pet->name,
-                        'diagnosis' => $record->diagnosis ?: 'N/A'
+                        'diagnosis' => $record->diagnosis ?: 'N/A',
+                        'clinic_name' => $clinicName,
                     ],
                     'automated',
                     $record
@@ -86,7 +130,7 @@ class MedicalRecordController extends Controller
             \Illuminate\Support\Facades\Log::warning("Failed to send automated medical record notification: " . $e->getMessage());
         }
 
-        return response()->json($record->load(['pet', 'vet', 'appointment.service']), 201);
+        return $this->successResponse($record->load(['pet', 'vet', 'appointment.service']), 'Treatment record saved.', 201);
     }
 
     public function show(MedicalRecord $medicalRecord)
@@ -107,21 +151,41 @@ class MedicalRecordController extends Controller
             'notes'           => 'nullable|string',
             'follow_up_date'  => 'nullable|date',
             'follow_up_time'  => 'nullable',
+            'owner_id'        => 'required|exists:owners,id',
         ]);
+
+        // Hierarchy Enforcement: Ensure Pet-Appointment-Owner chain is intact
+        if (!$this->isAppointmentForPet($validated['appointment_id'], $validated['pet_id'])) {
+            return $this->errorResponse(
+                'HIERARCHY_MISMATCH',
+                'relationship',
+                'Hierarchy Mismatch: The selected pet does not match the appointment record.',
+                ['pet_id' => ['Validation failed: Pet/Appointment linking mismatch.']],
+                422
+            );
+        }
+
+        if (!$this->isPetOwnedBy($validated['pet_id'], $validated['owner_id'])) {
+            return $this->errorResponse(
+                'HIERARCHY_MISMATCH',
+                'relationship',
+                'Hierarchy Mismatch: The selected pet does not belong to the provided owner record.',
+                ['owner_id' => ['Validation failed: Owner/Pet linking mismatch.']],
+                422
+            );
+        }
 
         // Only clinical staff (Veterinarian) may edit diagnosis
         if ($request->has('diagnosis') && auth()->check()) {
             $user = auth()->user();
             $userRole = property_exists($user, 'role') ? $user->role : null;
             if (!$userRole || !in_array($userRole, Roles::clinicalRoles())) {
-                return response()->json([
-                    'message' => 'Unauthorized. Only veterinarians may edit the diagnosis field.',
-                ], 403);
+                return $this->errorResponse('UNAUTHORIZED', 'clinical', 'Unauthorized. Only veterinarians may edit column values affecting clinical diagnosis.', [], 403);
             }
         }
 
-        $medicalRecord->update($validated);
-        return response()->json($medicalRecord->load(['pet', 'vet', 'appointment.service']));
+        $medicalRecord->update(collect($validated)->except('owner_id')->toArray());
+        return $this->successResponse($medicalRecord->load(['pet', 'vet', 'appointment.service']), 'Clinical record updated.');
     }
 
     public function destroy(MedicalRecord $medicalRecord)
@@ -132,11 +196,24 @@ class MedicalRecordController extends Controller
             $userRole = property_exists($user, 'role') ? $user->role : null;
             $allowedRoles = array_merge(Roles::adminRoles(), [Roles::VETERINARIAN->value]);
             if (!$userRole || !in_array($userRole, $allowedRoles)) {
-                return response()->json(['message' => 'Unauthorized.'], 403);
+                return $this->errorResponse('UNAUTHORIZED', 'clinical', 'Only authorized staff can delete medical records.', [], 403);
             }
         }
 
-        $medicalRecord->delete();
-        return response()->json(null, 204);
+        try {
+            $medicalRecord->delete();
+            return $this->successResponse(null, 'Clinical record removed.');
+        } catch (\Illuminate\Database\QueryException $e) {
+            if ($e->getCode() === '23000' || str_contains($e->getMessage(), '1451')) {
+                return $this->errorResponse(
+                    'RESTRICTED_DELETION',
+                    'relationship',
+                    'This clinical record cannot be deleted because it is referenced by other billing modules.',
+                    ['history' => ['Clinical record has billing dependencies.']],
+                    403
+                );
+            }
+            throw $e;
+        }
     }
 }

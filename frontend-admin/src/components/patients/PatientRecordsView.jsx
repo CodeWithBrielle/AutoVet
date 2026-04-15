@@ -144,7 +144,7 @@ function PatientRecordsView({ owners, selectedOwnerId, onSelectOwner, onOpenAddP
                           <p className="font-bold text-zinc-900 dark:text-zinc-100">{owner.name}</p>
                           <p className="max-w-[200px] truncate text-xs text-zinc-500 dark:text-zinc-500">
                             <FiMapPin className="inline mr-1 h-3 w-3" />
-                            {owner.address || "No address provided"}
+                            {owner.address ? `${owner.address}, ${owner.city}` : "No address provided"}
                           </p>
                         </div>
                       </div>
@@ -302,7 +302,7 @@ function PatientRecordsView({ owners, selectedOwnerId, onSelectOwner, onOpenAddP
                         <div className="min-w-0">
                            <p className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Permanent Address</p>
                            <p className="font-bold text-zinc-700 dark:text-zinc-200 leading-snug">
-                            {selectedOwner.address ? `${selectedOwner.address}, ${selectedOwner.city} ${selectedOwner.zip || ''}` : "No address recorded"}
+                            {selectedOwner.address ? `${selectedOwner.address}, ${selectedOwner.city}, ${selectedOwner.province} ${selectedOwner.zip || ''}` : "No address recorded"}
                            </p>
                         </div>
                      </div>

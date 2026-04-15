@@ -4,9 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Models\Pet;
 use Illuminate\Http\Request;
+use App\Traits\StandardizesResponses;
+use App\Traits\NormalizesData;
+use App\Traits\ValidatesContext;
 
 class PetController extends Controller
 {
+    use StandardizesResponses, NormalizesData, ValidatesContext;
+
     public function __construct()
     {
         $this->authorizeResource(Pet::class, 'pet');
@@ -23,7 +28,8 @@ class PetController extends Controller
             $query->where('owner_id', $request->owner_id);
         }
         
-        return response()->json($query->orderBy('created_at', 'desc')->get());
+        $pets = $query->orderBy('created_at', 'desc')->get();
+        return $this->successResponse($pets);
     }
 
     public function store(Request $request)
@@ -52,19 +58,22 @@ class PetController extends Controller
             'photo' => 'nullable|string',
         ]);
 
-        if ($request->filled('photo') && preg_match('/^data:image\/(\w+);base64,/', $request->photo)) {
-            $data = substr($request->photo, strpos($request->photo, ',') + 1);
-            $data = base64_decode($data);
-            $extension = explode('/', explode(':', substr($request->photo, 0, strpos($request->photo, ';')))[1])[1];
-            $fileName = uniqid() . '.' . $extension;
-            \Illuminate\Support\Facades\Storage::disk('public')->put('pets/' . $fileName, $data);
-            $validated['photo'] = 'pets/' . $fileName;
-        } elseif ($request->hasFile('photo')) {
-            $validated['photo'] = $request->file('photo')->store('pets', 'public');
+        // Precision Sanitization: Only structured labels
+        $validated['name'] = $this->sanitizeLabel($validated['name']);
+        if (isset($validated['color'])) {
+            $validated['color'] = $this->sanitizeLabel($validated['color']);
         }
+        // Note: Allergies, Medication, Notes are left RAW as per clinical precision requirements
 
-        $pet = Pet::create($validated);
-        return response()->json($pet->load(['owner', 'species', 'breed', 'sizeCategory']), 201);
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        try {
+            $pet = Pet::create($validated);
+            \Illuminate\Support\Facades\DB::commit();
+            return $this->successResponse($pet->load(['owner', 'species', 'breed', 'sizeCategory']), 'Pet record created.', 201);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
+            return $this->errorResponse('SAVE_FAILED', 'pet', 'Failed to save pet record.', [$e->getMessage()], 500);
+        }
     }
 
     public function show(Pet $pet)
@@ -115,21 +124,47 @@ class PetController extends Controller
             }
         }
 
-        $pet->update($validated);
-        return response()->json($pet->load(['owner', 'species', 'breed', 'sizeCategory']));
+        // Precision Sanitization
+        $validated['name'] = $this->sanitizeLabel($validated['name']);
+        if (isset($validated['color'])) {
+            $validated['color'] = $this->sanitizeLabel($validated['color']);
+        }
+
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        try {
+            $pet->update($validated);
+            \Illuminate\Support\Facades\DB::commit();
+            return $this->successResponse($pet->load(['owner', 'species', 'breed', 'sizeCategory']), 'Pet record updated.');
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
+            return $this->errorResponse('UPDATE_FAILED', 'pet', 'Failed to update pet record.', [$e->getMessage()], 500);
+        }
     }
 
     public function destroy(Pet $pet)
     {
         $user = auth()->user();
         if (
-            (method_exists($user, 'isAdmin') && !$user->isAdmin()) && 
+            (method_exists($user, 'isAdmin') && !$user->isAdmin()) &&
             (method_exists($user, 'isClinical') && !$user->isClinical())
         ) {
-            return response()->json(['message' => 'Unauthorized. Only Admins and Veterinarians can archive patient records.'], 403);
+            return $this->errorResponse('UNAUTHORIZED', 'auth', 'Unauthorized. Only Admins and Veterinarians can archive pet records.', [], 403);
         }
 
-        $pet->delete();
-        return response()->json(null, 204);
+        try {
+            $pet->delete();
+            return $this->successResponse(null, 'Pet record archived.');
+        } catch (\Illuminate\Database\QueryException $e) {
+            if ($e->getCode() === '23000' || str_contains($e->getMessage(), '1451')) {
+                return $this->errorResponse(
+                    'RESTRICTED_DELETION',
+                    'relationship',
+                    'This pet record cannot be deleted because it is referenced by historical medical or billing data.',
+                    ['history' => ['Pet has existing medical records or invoices.']],
+                    403
+                );
+            }
+            return $this->errorResponse('ARCHIVE_FAILED', 'pet', 'Failed to archive pet record.', [$e->getMessage()], 500);
+        }
     }
 }

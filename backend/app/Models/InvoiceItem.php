@@ -12,10 +12,33 @@ class InvoiceItem extends Model
 
     protected $guarded = [];
 
+    protected $appends = [
+        'resolved_unit_price',
+        'resolved_total',
+    ];
+
     protected $casts = [
         'synced_at'                => 'datetime',
         'last_modified_locally_at' => 'datetime',
+        'metadata_snapshot'        => 'array',
+        'is_billable'              => 'boolean',
     ];
+
+    /**
+     * Get the resolved price, preferring snapshot for finalized invoices.
+     */
+    public function getResolvedUnitPriceAttribute()
+    {
+        return $this->unit_price_snapshot ?? $this->unit_price;
+    }
+
+    /**
+     * Get the resolved total, preferring snapshot for finalized invoices.
+     */
+    public function getResolvedTotalAttribute()
+    {
+        return $this->line_total_snapshot ?? $this->amount;
+    }
 
     public function invoice()
     {
@@ -30,5 +53,15 @@ class InvoiceItem extends Model
     public function inventory()
     {
         return $this->belongsTo(Inventory::class, 'inventory_id');
+    }
+
+    public function parent()
+    {
+        return $this->belongsTo(InvoiceItem::class, 'parent_id');
+    }
+
+    public function children()
+    {
+        return $this->hasMany(InvoiceItem::class, 'parent_id');
     }
 }

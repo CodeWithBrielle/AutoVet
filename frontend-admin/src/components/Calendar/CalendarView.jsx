@@ -1,7 +1,9 @@
+import { useState, useEffect } from "react";
 import { FiChevronLeft, FiChevronRight, FiX, FiCalendar, FiClock } from "react-icons/fi";
 import { format, addMonths, subMonths, isToday } from "date-fns";
 import { useAuth } from "../../context/AuthContext";
 import { generateCalendarGrid } from "../../utils/calendarUtils";
+import clsx from "clsx";
 
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -12,7 +14,7 @@ const eventStyles = {
   rose: "border-rose-200 bg-rose-100/70 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
   amber: "border-amber-200 bg-amber-100/70 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   indigo: "border-indigo-200 bg-indigo-100/70 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
-  zinc: "border-zinc-200 dark:border-dark-border bg-zinc-200/80 text-zinc-700 dark:bg-zinc-700/60 dark:text-zinc-300 dark:text-zinc-300",
+  zinc: "border-zinc-200 dark:border-dark-border bg-zinc-200/80 text-zinc-700 dark:bg-zinc-700/60 dark:text-zinc-300",
 };
 
 const panelAccentStyles = {
@@ -216,29 +218,29 @@ function CalendarView() {
                             panelAccentStyles[statusTone] || panelAccentStyles.zinc
                           )}
                         >
-                        <p className="text-base font-bold text-zinc-800 dark:text-zinc-200">{event.title}</p>
-                        <div className="mt-2 flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-                          <FiClock className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span>{event.time}</span>
-                        </div>
-                        {event.pet_owner && (
-                          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                            <span className="font-medium">Owner:</span> {event.pet_owner}
-                          </p>
-                        )}
-                        {event.pet_name && (
-                          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                            <span className="font-medium">Patient:</span> {event.pet_name}
-                          </p>
-                        )}
-                        {event.notes && (
-                          <p className="mt-2 text-sm italic text-zinc-400 dark:text-zinc-50">{event.notes}</p>
-                        )}
+                          <p className="text-base font-bold text-zinc-800 dark:text-zinc-200">{event.title}</p>
+                          <div className="mt-2 flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+                            <FiClock className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span>{event.time}</span>
+                          </div>
+                          {event.pet?.owner?.name && (
+                            <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
+                              <span className="font-medium">Owner:</span> {event.pet.owner.name}
+                            </p>
+                          )}
+                          {event.pet_name && (
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                              <span className="font-medium">Patient:</span> {event.pet_name}
+                            </p>
+                          )}
+                          {event.notes && (
+                            <p className="mt-2 text-sm italic text-zinc-400 dark:text-zinc-50">{event.notes}</p>
+                          )}
                         </li>
-                        );
-                        })}
-                        </ul>
-                        )}
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             </aside>
           )}

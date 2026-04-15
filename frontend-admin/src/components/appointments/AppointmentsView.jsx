@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { normalizeApiResponse } from "../../utils/apiResponseNormalizer";
 import { useLocation } from "react-router-dom";
 import clsx from "clsx";
 import {
@@ -15,9 +16,7 @@ import {
   FiChevronLeft,
   FiChevronRight,
   FiChevronDown,
-  FiChevronUp,
   FiBell,
-  FiRefreshCcw,
   FiThumbsUp,
   FiThumbsDown
 } from "react-icons/fi";
@@ -29,17 +28,25 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 import ManualSendModal from "../notifications/ManualSendModal";
+import SearchableSelect from "../common/SearchableSelect";
+import ValidationSummary from "../common/ValidationSummary";
 
 const viewModes = ["Month", "Week", "Day"];
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+const todayString = new Date().toISOString().split('T')[0];
+
 const quickAddSchema = z.object({
-  date: z.string().min(1, "Date is required"),
+  date: z.string().min(1, "Date is required").refine(val => val >= todayString, {
+    message: "Appointment date cannot be in the past"
+  }),
   time: z.string().min(1, "Time is required").regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Invalid time format (HH:mm)"),
+  owner_id: z.string().min(1, "Please select an owner"),
   pet_id: z.string().min(1, "Please select a pet"),
   service_id: z.string().min(1, "Please select a service"),
-  vet_id: z.string().optional(),
+  vet_id: z.string().min(1, "Please select a veterinarian"),
   notes: z.string().optional(),
 }).refine((data) => {
   const now = new Date();
@@ -68,7 +75,6 @@ function AppointmentsView() {
   const [categories, setCategories] = useState([]);
   const { user } = useAuth();
 
-  // New state for interactivity
   const [activePanel, setActivePanel] = useState("booking"); // 'booking' | 'details'
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -86,6 +92,7 @@ function AppointmentsView() {
     defaultValues: {
       date: "",
       time: "",
+      owner_id: "",
       pet_id: preSelectedPetId || "",
       service_id: "",
       vet_id: "",
@@ -93,100 +100,81 @@ function AppointmentsView() {
     }
   });
 
-  const watchPetId = watch("pet_id");
-
-  // Update form if preSelectedPetId changes
-  useEffect(() => {
-    if (preSelectedPetId) {
-      setValue("pet_id", preSelectedPetId);
-    }
-  }, [preSelectedPetId, setValue]);
-
   const [owners, setOwners] = useState([]);
   const [pets, setPets] = useState([]);
   const [services, setServices] = useState([]);
   const [vets, setVets] = useState([]);
   const [selectedOwnerId, setSelectedOwnerId] = useState("");
 
-  const fetchAppointments = () => {
+  const fetchAppointments = useCallback(() => {
     if (!user?.token) return;
-    fetch("/api/appointments", {
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Bearer ${user.token}`
-      }
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        // Ensure data is an array
-        if (Array.isArray(data)) {
-          setAppointments(data);
-        } else if (data && typeof data === "object" && Array.isArray(data.appointments)) {
-          setAppointments(data.appointments);
-        } else {
-          setAppointments([]);
-        }
+    api.get("/api/appointments")
+      .then((res) => {
+        const data = normalizeApiResponse(res);
+        setAppointments(data);
       })
       .catch((err) => {
         console.error("Error fetching appointments:", err);
         setAppointments([]);
       });
-  };
+  }, [user?.token]);
 
   useEffect(() => {
+    let isMounted = true;
     if (!user?.token) return;
 
-    fetchAppointments();
+    Promise.all([
+      api.get("/api/appointments"),
+      api.get("/api/owners"),
+      api.get("/api/pets"),
+      api.get("/api/services"),
+      api.get("/api/vets"),
+      api.get("/api/settings"),
+      api.get("/api/dashboard/appointment-forecast")
+    ]).then(([apptRes, ownersRes, petsRes, servicesRes, vetsRes, settingsRes, forecastRes]) => {
+      if (!isMounted) return;
 
-    const headers = {
-      "Accept": "application/json",
-      "Authorization": `Bearer ${user.token}`
-    };
+      const apptData = normalizeApiResponse(apptRes);
+      const ownersData = normalizeApiResponse(ownersRes);
+      const petsData = normalizeApiResponse(petsRes);
+      const servicesData = normalizeApiResponse(servicesRes);
+      const vetsData = normalizeApiResponse(vetsRes);
 
-    fetch("/api/owners", { headers })
-      .then((res) => res.json())
-      .then((data) => setOwners(Array.isArray(data) ? data : []))
-      .catch((err) => console.error("Error fetching owners:", err));
+      setAppointments(apptData);
+      setOwners(ownersData);
+      setPets(petsData);
+      setServices(servicesData);
+      setVets(vetsData);
 
-    fetch("/api/pets", { headers })
-      .then((res) => res.json())
-      .then((data) => setPets(Array.isArray(data) ? data : []))
-      .catch((err) => console.error("Error fetching pets:", err));
-
-    fetch("/api/services", { headers })
-      .then((res) => res.json())
-      .then((data) => setServices(Array.isArray(data) ? data : []))
-      .catch((err) => console.error("Error fetching services:", err));
-
-    fetch("/api/vets", { headers })
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setVets(data);
-        } else {
-          setVets([]);
+      if (preSelectedPetId) {
+        const foundPet = petsData.find(p => p.id.toString() === preSelectedPetId.toString());
+        if (foundPet) {
+          const ownerIdStr = foundPet.owner_id.toString();
+          setSelectedOwnerId(ownerIdStr);
+          setValue("owner_id", ownerIdStr);
+          setValue("pet_id", preSelectedPetId.toString());
         }
-      })
-      .catch((err) => {
-        console.error("Error fetching vets:", err);
-        setVets([]);
-      });
+      }
 
-    fetch("/api/settings", { headers })
-      .then(res => res.json())
-      .then(data => {
-        const inv = data.inventory_categories ? JSON.parse(data.inventory_categories) : [];
-        const svc = data.service_categories ? JSON.parse(data.service_categories) : [];
-        setCategories([...new Set([...inv, ...svc])]);
-      })
-      .catch(() => setCategories([]));
+      const settingsData = settingsRes.data || {};
+      const inv = settingsData.inventory_categories ? JSON.parse(settingsData.inventory_categories) : [];
+      const svc = settingsData.service_categories ? JSON.parse(settingsData.service_categories) : [];
+      setCategories([...new Set([...inv, ...svc])]);
 
-    // Fetch initial AI forecast
-    fetch("/api/dashboard/appointment-forecast", { headers })
-      .then(res => res.json())
-      .then(data => setAiForecast(data))
-      .catch(() => { });
-  }, [user?.token]);
+      if (forecastRes.data) setAiForecast(forecastRes.data);
+    }).catch(err => {
+      console.error("[AppointmentsView] Error loading data:", err);
+      if (isMounted) {
+        setAppointments([]);
+        setOwners([]);
+        setPets([]);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.token, preSelectedPetId, setValue]);
 
   const handleReviewHints = () => {
     if (aiForecast) {
@@ -204,41 +192,29 @@ function AppointmentsView() {
     }
   };
 
-  const onSubmit = async (data) => {
+  const onSubmit = async (formData) => {
     try {
-      const payload = { ...data };
+      const payload = { ...formData };
+      if (payload.owner_id) payload.owner_id = Number(payload.owner_id);
       if (payload.pet_id) payload.pet_id = Number(payload.pet_id);
       if (payload.service_id) payload.service_id = Number(payload.service_id);
       if (payload.vet_id) payload.vet_id = Number(payload.vet_id);
 
-      const url = selectedAppointment 
-        ? `/api/appointments/${selectedAppointment.id}`
-        : "/api/appointments";
-      
-      const method = selectedAppointment ? "PUT" : "POST";
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.message || "Failed to save appointment.");
+      if (selectedAppointment) {
+        await api.put(`/api/appointments/${selectedAppointment.id}`, payload);
+        toast.success("Appointment Updated!");
+      } else {
+        await api.post("/api/appointments", payload);
+        toast.success("Appointment Scheduled!");
       }
 
-      toast.success(selectedAppointment ? "Appointment Updated!" : "Appointment Scheduled!");
       reset();
       setSelectedAppointment(null);
       setIsDrawerOpen(false);
       fetchAppointments();
     } catch (err) {
-      toast.error(err.message);
+      const message = err.response?.data?.message || err.message || "Failed to schedule appointment.";
+      toast.error(message);
     }
   };
 
@@ -255,7 +231,9 @@ function AppointmentsView() {
     
     // Set selected owner so pet list populates
     if (selectedAppointment.pet?.owner_id) {
-      setSelectedOwnerId(String(selectedAppointment.pet.owner_id));
+      const oId = String(selectedAppointment.pet.owner_id);
+      setSelectedOwnerId(oId);
+      setValue("owner_id", oId);
     }
     
     setActivePanel("booking");
@@ -268,6 +246,7 @@ function AppointmentsView() {
     reset({
       date: entry.dateString,
       time: "",
+      owner_id: "",
       pet_id: preSelectedPetId || "",
       service_id: "",
       vet_id: "",
@@ -286,26 +265,30 @@ function AppointmentsView() {
     setIsDrawerOpen(true);
   };
 
-  const handleStatusAction = async (action) => {
+  const handleStatusUpdate = async (id, status) => {
     try {
-      const response = await fetch(`/api/appointments/${selectedAppointment.id}/${action}`, {
-        method: "POST",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
+      await api.put(`/api/appointments/${id}`, {
+        ...selectedAppointment,
+        status,
+        pet_id: selectedAppointment.pet_id,
+        service_id: selectedAppointment.service_id,
+        date: selectedAppointment.date,
+        time: selectedAppointment.time?.substring(0, 5),
       });
 
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.message || `Failed to ${action} appointment.`);
-      }
-
-      toast.success(`Appointment ${action} successfully.`);
+      toast.success(`Appointment marked as ${status.replace('_', ' ')}`);
       fetchAppointments();
-      setSelectedAppointment(prev => ({ ...prev, status: action === 'approve' ? 'approved' : 'declined' }));
+      setSelectedAppointment(prev => ({ ...prev, status }));
     } catch (err) {
-      toast.error(err.message);
+      let errorMessage = "Failed to update status";
+      if (err.response?.data?.errors) {
+        errorMessage = Object.values(err.response.data.errors).flat().join(", ");
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      toast.error(errorMessage);
     }
   };
 
@@ -313,24 +296,17 @@ function AppointmentsView() {
     setIsSendModalOpen(true);
   };
 
-
   const handleDeleteAppointment = async (id) => {
-    if (!window.confirm("Are you sure you want to cancel/delete this appointment?")) return;
+    if (!window.confirm("Are you sure you want to delete this appointment?")) return;
     try {
-      const response = await fetch(`/api/appointments/${id}`, {
-        method: "DELETE",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        }
-      });
-      if (!response.ok) throw new Error("Failed to delete appointment");
+      await api.delete(`/api/appointments/${id}`);
       toast.success("Appointment Deleted");
       setActivePanel("booking");
       setSelectedAppointment(null);
+      setIsDrawerOpen(false);
       fetchAppointments();
     } catch (err) {
-      toast.error(err.message);
+      toast.error(err.response?.data?.message || err.message || "Failed to delete appointment");
     }
   };
 
@@ -390,7 +366,7 @@ function AppointmentsView() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-rose-500"></div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Declined/Cancelled/Past</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Declined/Past</span>
               </div>
             </div>
 
@@ -434,8 +410,8 @@ function AppointmentsView() {
           )}>
             {calendarDays.map((entry, index) => {
               const todayStr = format(new Date(), "yyyy-MM-dd");
-              const isToday = entry.dateString === todayStr;
-              const isPast = entry.dateString < todayStr;
+              const isCellToday = entry.dateString === todayStr;
+              const isCellPast = entry.dateString < todayStr;
 
               if (activeViewMode === "Month" && !entry.inMonth) {
                 return <div key={`empty-${index}`} className="min-h-[140px] bg-zinc-50/10 dark:bg-dark-surface/5" />;
@@ -448,18 +424,18 @@ function AppointmentsView() {
                   className={clsx(
                     "group relative min-h-[140px] p-2 transition-all cursor-pointer",
                     !entry.inMonth && "bg-zinc-50/20 dark:bg-dark-surface/10 opacity-40",
-                    isToday && "bg-emerald-50/50 dark:bg-emerald-900/10",
-                    isPast && "bg-zinc-100/50 dark:bg-zinc-800/40 grayscale-sm cursor-default",
-                    !isPast && "hover:bg-emerald-50/30 dark:hover:bg-emerald-500/5"
+                    isCellToday && "bg-emerald-50/50 dark:bg-emerald-900/10",
+                    isCellPast && "bg-zinc-100/50 dark:bg-zinc-800/40 grayscale-sm cursor-default",
+                    !isCellPast && "hover:bg-emerald-50/30 dark:hover:bg-emerald-500/5"
                   )}
                 >
                   <div className="flex items-center justify-between">
                     <span
                       className={clsx(
                         "inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold transition-all",
-                        isToday
+                        isCellToday
                           ? "bg-emerald-600 text-white shadow-lg"
-                          : (isPast ? "text-zinc-400 dark:text-zinc-600" : (entry.inMonth ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-400 dark:text-zinc-600"))
+                          : (isCellPast ? "text-zinc-400 dark:text-zinc-600" : (entry.inMonth ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-400 dark:text-zinc-600"))
                       )}
                     >
                       {entry.day}
@@ -467,7 +443,7 @@ function AppointmentsView() {
                     {entry.events.length > 0 && (
                       <span className={clsx(
                         "text-[9px] font-bold px-1.5 py-0.5 rounded-md italic",
-                        isPast ? "text-zinc-400 bg-zinc-100 dark:bg-zinc-800" : "text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20"
+                        isCellPast ? "text-zinc-400 bg-zinc-100 dark:bg-zinc-800" : "text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20"
                       )}>
                         {entry.events.length}
                       </span>
@@ -476,29 +452,13 @@ function AppointmentsView() {
 
                   <div className="mt-2 space-y-1.5">
                     {entry.events.map((event) => {
-                      // Status logic:
-                      // Grey: Pending
-                      // Green: Approved / Completed
-                      // Red: Declined / Cancelled / Past its time if still pending
-                      const isPast = new Date(`${event.date}T${event.time}`) < new Date();
-                      
-                      let statusColorClass = "";
-                      let statusText = event.status;
-
-                      if (event.status === 'approved' || event.status === 'completed') {
-                        statusColorClass = "border-emerald-400/50 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300";
-                        if (event.status === 'approved') statusText = 'Approved';
-                        if (event.status === 'completed') statusText = 'Completed';
-                      } else if (event.status === 'declined' || event.status === 'cancelled' || (event.status === 'pending' && isPast)) {
-                        statusColorClass = "border-rose-400/50 bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300";
-                        if (event.status === 'declined') statusText = 'Declined';
-                        if (event.status === 'cancelled') statusText = 'Cancelled';
-                        if (event.status === 'pending' && isPast) statusText = 'Past/No Show';
-                      } else {
-                        // Default pending
-                        statusColorClass = "border-zinc-400/50 bg-zinc-50 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400";
-                        statusText = 'Pending';
-                      }
+                      const statusColors = {
+                        pending: "border-blue-400 bg-blue-50/80 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200",
+                        in_progress: "border-orange-400 bg-orange-50/80 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200",
+                        completed: "border-emerald-400 bg-emerald-50/80 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
+                        cancelled: "border-rose-400 bg-rose-50/80 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
+                      };
+                      const currentColor = statusColors[event.status?.toLowerCase()] || "border-slate-400 bg-slate-50 text-slate-700 dark:bg-slate-900/20 dark:text-slate-300";
 
                       return (
                         <article
@@ -506,7 +466,7 @@ function AppointmentsView() {
                           onClick={(e) => handleAppointmentClick(e, event)}
                           className={clsx(
                             "rounded-lg border-l-4 px-2 py-1 text-[10px] font-bold shadow-sm transition-all hover:translate-x-1 group/appt",
-                            statusColorClass
+                            currentColor
                           )}
                         >
                           <div className="flex items-center justify-between gap-1">
@@ -565,28 +525,56 @@ function AppointmentsView() {
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-                <div className="space-y-5 rounded-[2rem] border-2 border-zinc-100 bg-zinc-50/30 p-8 dark:border-dark-border dark:bg-dark-surface/30">
+                {Object.keys(errors).length > 0 && (
+                  <ValidationSummary errors={errors} />
+                )}
+                <div className="space-y-5 rounded-[2rem] border-2 border-slate-100 bg-slate-50/30 p-8 dark:border-dark-border dark:bg-dark-surface/30">
                   <div>
-                    <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Client / Owner Record</label>
-                    <div className="relative">
-                      <select value={selectedOwnerId} onChange={(e) => { setSelectedOwnerId(e.target.value); setValue("pet_id", ""); }} className={clsx(getQInputClass(false), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
-                        <option value="">— Select Owner —</option>
-                        {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                      </select>
-                      <FiChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    </div>
+                    <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Client / Owner Record</label>
+                    <SearchableSelect 
+                      options={owners.map(o => ({
+                        value: o.id.toString(),
+                        label: o.name,
+                        sublabel: o.phone || o.email || "No contact info"
+                      }))}
+                      value={watch("owner_id")}
+                      onChange={(id) => {
+                        setValue("owner_id", id, { shouldValidate: true });
+                        setSelectedOwnerId(id);
+                        setValue("pet_id", "");
+                      }}
+                      placeholder="Search owner..."
+                      error={errors.owner_id?.message}
+                    />
                   </div>
 
                   <div>
-                    <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Patient / Pet Identification *</label>
-                    <div className="relative">
-                      <select {...register("pet_id")} disabled={!selectedOwnerId} className={clsx(getQInputClass(errors.pet_id), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
-                        <option value="">— Select Pet —</option>
-                        {pets.filter(p => p.owner_id.toString() === selectedOwnerId.toString()).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.species?.name})</option>)}
-                      </select>
-                      <FiChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                    </div>
-                    {errors.pet_id && <p className="mt-2 text-xs text-red-500 font-black italic">{errors.pet_id.message}</p>}
+                    <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Patient / Pet Identification *</label>
+                    {(() => {
+                      const filteredPets = pets.filter(p => p.owner_id?.toString() === selectedOwnerId?.toString());
+                      const hasPets = filteredPets.length > 0;
+                      
+                      return (
+                        <SearchableSelect 
+                          options={filteredPets.map(p => ({
+                            value: p.id.toString(),
+                            label: p.name,
+                            sublabel: p.species?.name || "Unknown species"
+                          }))}
+                          value={watch("pet_id")}
+                          onChange={(id) => setValue("pet_id", id, { shouldValidate: true })}
+                          placeholder={
+                            !selectedOwnerId 
+                              ? "Select owner first" 
+                              : hasPets 
+                                ? `Search pet (${filteredPets.length} available)...` 
+                                : "No pets registered for this owner"
+                          }
+                          disabled={!selectedOwnerId || !hasPets}
+                          error={errors.pet_id?.message}
+                        />
+                      );
+                    })()}
                   </div>
 
                   <div>
@@ -604,8 +592,8 @@ function AppointmentsView() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Date</label>
-                    <input type="date" {...register("date")} className={clsx(getQInputClass(errors.date), "font-bold bg-white dark:bg-dark-card")} />
+                    <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Date</label>
+                    <input type="date" {...register("date")} min={todayString} className={clsx(getQInputClass(errors.date), "font-bold bg-white dark:bg-dark-card")} />
                     {errors.date && <p className="mt-1 text-xs text-red-500 font-bold">{errors.date.message}</p>}
                   </div>
                   <div>
@@ -616,14 +604,15 @@ function AppointmentsView() {
                 </div>
 
                 <div>
-                  <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Assigned Veterinarian</label>
+                  <label className="mb-3 block text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Assigned Veterinarian *</label>
                   <div className="relative">
-                    <select {...register("vet_id")} className={clsx(getQInputClass(false), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
+                    <select {...register("vet_id")} className={clsx(getQInputClass(errors.vet_id), "appearance-none pr-10 font-bold bg-white dark:bg-dark-card")}>
                       <option value="">— Select Vet —</option>
                       {vets.map(v => <option key={v.id} value={v.id}>Dr. {v.name}</option>)}
                     </select>
-                    <FiChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-401" />
+                    <FiChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                   </div>
+                  {errors.vet_id && <p className="mt-2 text-xs text-red-500 font-black italic">{errors.vet_id.message}</p>}
                 </div>
 
                 <div>
@@ -633,7 +622,7 @@ function AppointmentsView() {
 
                 <button type="submit" disabled={isSubmitting} className="inline-flex h-16 w-full items-center justify-center gap-3 rounded-2xl bg-emerald-600 text-sm font-black uppercase tracking-[0.2em] text-white shadow-2xl shadow-emerald-500/40 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all mt-4">
                   <FiPlusCircle className="h-6 w-6" />
-                  {isSubmitting ? "Syncing..." : "Finalize Appointment"}
+                  {isSubmitting ? "Syncing..." : selectedAppointment ? "Update Appointment" : "Finalize Appointment"}
                 </button>
               </form>
             </section>
@@ -647,33 +636,6 @@ function AppointmentsView() {
                   <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mt-1">Internal record view</p>
                 </div>
                 <div className="flex gap-2">
-                  {selectedAppointment?.status === 'pending' && (
-                    <>
-                      <button
-                        onClick={() => handleStatusAction('approve')}
-                        className="rounded-2xl bg-emerald-100 p-3 text-emerald-600 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:hover:bg-emerald-800/50 transition-all active:scale-90"
-                        title="Approve Appointment"
-                      >
-                        <FiThumbsUp className="h-6 w-6" />
-                      </button>
-                      <button
-                        onClick={() => handleStatusAction('decline')}
-                        className="rounded-2xl bg-rose-100 p-3 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:hover:bg-rose-800/50 transition-all active:scale-90"
-                        title="Decline Appointment"
-                      >
-                        <FiThumbsDown className="h-6 w-6" />
-                      </button>
-                    </>
-                  )}
-                  {selectedAppointment?.status === 'approved' && (
-                    <button
-                      onClick={handleSendReminder}
-                      className="rounded-2xl bg-indigo-100 p-3 text-indigo-600 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300 dark:hover:bg-indigo-800/50 transition-all active:scale-90"
-                      title="Send Reminder"
-                    >
-                      <FiBell className="h-6 w-6" />
-                    </button>
-                  )}
                   <button
                     onClick={() => { setIsDrawerOpen(false); setSelectedAppointment(null); }}
                     className="rounded-2xl bg-zinc-100 p-3 text-zinc-500 hover:bg-zinc-200 dark:bg-dark-surface dark:text-zinc-400 dark:hover:bg-dark-border transition-all active:scale-90"
@@ -692,14 +654,16 @@ function AppointmentsView() {
                     <h4 className="text-3xl font-black tracking-tight text-zinc-900 dark:text-zinc-50 truncate italic leading-tight">{selectedAppointment?.title}</h4>
                     <div className={clsx(
                       "mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2 text-xs font-black uppercase tracking-widest shadow-lg",
-                      selectedAppointment?.status === "approved" || selectedAppointment?.status === "completed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                      selectedAppointment?.status === "declined" || selectedAppointment?.status === "cancelled" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
-                          "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                      selectedAppointment?.status?.toLowerCase() === "completed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                        selectedAppointment?.status?.toLowerCase() === "cancelled" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400" :
+                          selectedAppointment?.status?.toLowerCase() === "in_progress" ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" :
+                            "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
                     )}>
-                      {selectedAppointment?.status === "approved" || selectedAppointment?.status === "completed" && <FiCheckCircle className="h-4 w-4" />}
-                      {selectedAppointment?.status === "declined" || selectedAppointment?.status === "cancelled" && <FiXCircle className="h-4 w-4" />}
-                      {selectedAppointment?.status === "pending" && <FiAlertCircle className="h-4 w-4" />}
-                      {selectedAppointment?.status || "pending"}
+                      {selectedAppointment?.status?.toLowerCase() === "completed" && <FiCheckCircle className="h-4 w-4" />}
+                      {selectedAppointment?.status?.toLowerCase() === "cancelled" && <FiXCircle className="h-4 w-4" />}
+                      {selectedAppointment?.status?.toLowerCase() === "in_progress" && <FiAlertCircle className="h-4 w-4" />}
+                      {selectedAppointment?.status?.toLowerCase() === "pending" && <FiClock className="h-4 w-4" />}
+                      {selectedAppointment?.status === "pending" ? "Scheduled" : selectedAppointment?.status?.replace('_', '-') || "Scheduled"}
                     </div>
                   </div>
                 </div>
@@ -719,8 +683,8 @@ function AppointmentsView() {
                       <FiClock className="h-6 w-6 text-emerald-500" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Arrival Time</p>
-                      <p className="text-lg font-black text-zinc-800 dark:text-zinc-100 italic">{selectedAppointment?.time?.substring(0, 5)}</p>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Appointment Time</p>
+                      <p className="text-lg font-black text-slate-800 dark:text-zinc-100 italic">{selectedAppointment?.time?.substring(0, 5)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-5">
@@ -728,9 +692,9 @@ function AppointmentsView() {
                       <FiUser className="h-6 w-6 text-emerald-500" />
                     </div>
                     <div className="overflow-hidden">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Patient & Guardian</p>
-                      <p className="text-lg font-black text-zinc-800 dark:text-zinc-100 truncate">
-                        {selectedAppointment?.pet?.name} <span className="mx-2 text-zinc-300 font-normal">|</span> <span className="text-zinc-500 dark:text-zinc-400">ID #{selectedAppointment?.pet?.owner_id}</span>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Patient & Guardian</p>
+                      <p className="text-lg font-black text-slate-800 dark:text-zinc-100 truncate">
+                        {selectedAppointment?.pet?.name} <span className="mx-2 text-slate-300 font-normal">|</span> <span className="text-slate-500 dark:text-zinc-400">{selectedAppointment?.pet?.owner?.name || "No Owner Info"}</span>
                       </p>
                     </div>
                   </div>
@@ -746,62 +710,63 @@ function AppointmentsView() {
                 )}
 
                 <div className="pt-6">
-                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-400 text-center mb-6">Security & Lifecycle Actions</p>
-
-                  {(selectedAppointment?.status === 'approved' || selectedAppointment?.status === 'pending') && (
-                    <button
-                      onClick={handleSendReminder}
-                      className="mb-4 w-full flex h-14 items-center justify-center gap-3 rounded-2xl bg-indigo-100 text-sm font-black uppercase tracking-widest text-indigo-700 shadow-xl shadow-indigo-200/50 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300 dark:hover:bg-indigo-800/50 transition-all active:scale-95"
-                    >
-                      <FiBell className="h-5 w-5" />
-                      Send Reminder
-                    </button>
-                  )}
-
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 text-center mb-6">Security & Lifecycle Actions</p>
+                  <button
+                    onClick={() => setIsSendModalOpen(true)}
+                    className="mb-8 w-full flex h-14 items-center justify-center gap-3 rounded-2xl bg-blue-100 text-sm font-black uppercase tracking-widest text-blue-700 shadow-xl shadow-blue-200/50 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-800/50 transition-all active:scale-95"
+                  >
+                    <FiBell className="h-5 w-5" />
+                    Send Reminder
+                  </button>
+                  
                   <button
                     onClick={handleEditClick}
-                    className="mb-4 w-full flex h-14 items-center justify-center gap-3 rounded-2xl border-2 border-emerald-100 text-sm font-black uppercase tracking-widest text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/30 dark:hover:bg-emerald-900/10 transition-all active:scale-95"
+                    className="mb-8 w-full flex h-14 items-center justify-center gap-3 rounded-2xl border-2 border-emerald-100 text-sm font-black uppercase tracking-widest text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/30 dark:hover:bg-emerald-900/10 transition-all active:scale-95"
                   >
                     <FiCalendar className="h-5 w-5" />
                     Edit Details
                   </button>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    {selectedAppointment?.status === 'pending' && (
-                      <>
-                        <button
-                          onClick={() => handleStatusAction('approve')}
-                          className="flex h-16 items-center justify-center gap-3 rounded-2xl bg-emerald-600 text-sm font-black uppercase tracking-widest text-white shadow-xl shadow-emerald-500/30 hover:bg-emerald-700 transition-all active:scale-95"
-                        >
-                          <FiThumbsUp className="h-6 w-6" />
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleStatusAction('decline')}
-                          className="flex h-16 items-center justify-center gap-3 rounded-2xl bg-rose-600 text-sm font-black uppercase tracking-widest text-white shadow-xl shadow-rose-500/30 hover:bg-rose-700 transition-all active:scale-95"
-                        >
-                          <FiThumbsDown className="h-6 w-6" />
-                          Decline
-                        </button>
-                      </>
-                    )}
-                    {(selectedAppointment?.status === 'approved' || selectedAppointment?.status === 'declined' || selectedAppointment?.status === 'completed') && (
-                      <button
-                        onClick={() => handleStatusAction('completed')}
-                        className="flex h-16 items-center justify-center gap-3 rounded-2xl bg-emerald-600 text-sm font-black uppercase tracking-widest text-white shadow-xl shadow-emerald-500/30 hover:bg-emerald-700 transition-all active:scale-95 col-span-2"
-                      >
-                        <FiCheckCircle className="h-6 w-6" />
-                        Mark as Completed
-                      </button>
-                    )}
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "pending")}
+                      className="flex h-16 flex-col items-center justify-center gap-1 rounded-2xl bg-blue-100 text-[10px] font-black uppercase tracking-widest text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 transition-all active:scale-95"
+                    >
+                      <FiClock className="h-5 w-5" />
+                      Scheduled
+                    </button>
+                    <button
+                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "in_progress")}
+                      className="flex h-16 flex-col items-center justify-center gap-1 rounded-2xl bg-orange-100 text-[10px] font-black uppercase tracking-widest text-orange-700 hover:bg-orange-200 dark:bg-orange-900/40 dark:text-orange-300 transition-all active:scale-95"
+                    >
+                      <FiAlertCircle className="h-5 w-5" />
+                      In-Progress
+                    </button>
+                    <button
+                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "completed")}
+                      className="flex h-16 flex-col items-center justify-center gap-1 rounded-2xl bg-emerald-600 text-[10px] font-black uppercase tracking-widest text-white shadow-xl shadow-emerald-500/30 hover:bg-emerald-700 transition-all active:scale-95"
+                    >
+                      <FiCheckCircle className="h-5 w-5" />
+                      Completed
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleDeleteAppointment(selectedAppointment?.id)}
-                    className="flex h-16 w-full items-center justify-center gap-3 rounded-2xl border-2 border-rose-100 text-sm font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 dark:border-rose-900/30 dark:hover:bg-rose-900/10 transition-all active:scale-95 mt-4"
-                  >
-                    <FiTrash2 className="h-6 w-6" />
-                    Archive Appointment
-                  </button>
+
+                  <div className="grid grid-cols-2 gap-4 mt-6">
+                    <button
+                      onClick={() => handleStatusUpdate(selectedAppointment?.id, "cancelled")}
+                      className="flex h-14 items-center justify-center gap-3 rounded-2xl bg-slate-100 text-xs font-black uppercase tracking-widest text-slate-700 shadow-lg shadow-slate-200/50 hover:bg-slate-200 dark:bg-dark-surface dark:text-zinc-300 dark:hover:bg-dark-border transition-all active:scale-95"
+                    >
+                      <FiXCircle className="h-5 w-5" />
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAppointment(selectedAppointment?.id)}
+                      className="flex h-14 items-center justify-center gap-3 rounded-2xl border-2 border-rose-100 text-xs font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 dark:border-rose-900/30 dark:hover:bg-rose-900/10 transition-all active:scale-95"
+                    >
+                      <FiTrash2 className="h-5 w-5" />
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -813,12 +778,12 @@ function AppointmentsView() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xl shadow-emerald-500/40">
                 <LuSparkles className="h-5 w-5" />
               </div>
-              <p className="text-xs font-black uppercase tracking-[0.2em] italic">Forecaster Intelligence</p>
+              <p className="text-xs font-black uppercase tracking-[0.2em] italic">Clinic Insights</p>
             </div>
             <p className="text-sm leading-relaxed text-zinc-600 dark:text-emerald-300/80 font-bold italic">{aiForecast?.insight || "Analyzing clinic data for scheduling trends..."}</p>
             <button onClick={handleReviewHints} className="mt-5 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-700 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 transition-colors">
               <FiBell className="h-4 w-4" />
-              Access planning matrix
+              View Details
             </button>
           </section>
         </aside>
@@ -827,9 +792,9 @@ function AppointmentsView() {
       <ManualSendModal 
         isOpen={isSendModalOpen} 
         onClose={() => setIsSendModalOpen(false)} 
-        owner={owners.find(o => o.id === selectedAppointment?.pet?.owner_id)}
+        owner={owners.find(o => o.id.toString() === selectedAppointment?.pet?.owner_id?.toString())}
         relatedObject={selectedAppointment}
-        relatedType="App\Models\Appointment"
+        relatedType="App\\Models\\Appointment"
       />
     </div>
   );

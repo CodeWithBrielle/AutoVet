@@ -2,140 +2,64 @@ import { useState, useEffect } from "react";
 import { FiPlus, FiTrash2, FiEdit2, FiCheck, FiX } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 
-export default function SpeciesBreedsTab() {
+export default function SpeciesBreedsTab({ masterData, onRefetch }) {
+  const species = masterData?.species || [];
+  const sizeCategories = masterData?.petSizes || [];
   const toast = useToast();
   const { user } = useAuth();
-  const [species, setSpecies] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const isLoading = masterData?.loading || false;
   const [selectedSpecies, setSelectedSpecies] = useState(null);
 
+  // Species management state
   const [newSpeciesName, setNewSpeciesName] = useState("");
-  const [newBreedName, setNewBreedName] = useState("");
-  const [newBreedDefaultSize, setNewBreedDefaultSize] = useState("");
-
   const [editingSpecies, setEditingSpecies] = useState(null);
   const [editSpeciesName, setEditSpeciesName] = useState("");
+
+  // Breed management state
+  const [newBreedName, setNewBreedName] = useState("");
+  const [newBreedDefaultSize, setNewBreedDefaultSize] = useState("");
   const [editingBreed, setEditingBreed] = useState(null);
   const [editBreedName, setEditBreedName] = useState("");
   const [editBreedDefaultSize, setEditBreedDefaultSize] = useState("");
-  const [sizeCategories, setSizeCategories] = useState([]);
 
-  const fetchSpecies = async () => {
-    if (!user?.token) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const res = await fetch("/api/species", {
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user.token}`
-        }
-      });
-      if (res.ok) {
-        const result = await res.json();
-        // Normalize: Handle both { data: [...] } and direct array [...]
-        const normalizedData = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setSpecies(normalizedData);
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to load species.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchSizeCategories = async () => {
-    if (!user?.token) return;
-    try {
-      const res = await fetch("/api/pet-size-categories", {
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user.token}`
-        }
-      });
-      if (res.ok) {
-        const result = await res.json();
-        const cats = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-        setSizeCategories(cats);
-      }
-    } catch (err) {
-      console.error("Failed to load size categories", err);
-    }
-  };
-
-  useEffect(() => {
-    fetchSpecies();
-    fetchSizeCategories();
-  }, [user]);
+  // Internal fetching removed - data now comes via props from Settings parent
 
   const handleAddSpecies = async (e) => {
     e.preventDefault();
-    if (!newSpeciesName.trim()) return;
+    if (!(newSpeciesName || "").trim()) return;
     try {
-      const res = await fetch("/api/species", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify({ name: newSpeciesName.trim(), status: "Active" })
-      });
-      if (res.ok) {
-        toast.success("Species added.");
-        setNewSpeciesName("");
-        fetchSpecies();
-      } else {
-        const err = await res.json();
-        toast.error(err.message || "Failed to add species.");
-      }
-    } catch {
-      toast.error("Network error.");
+      await api.post("/api/species", { name: (newSpeciesName || "").trim(), status: "Active" });
+      toast.success("Species added.");
+      setNewSpeciesName("");
+      onRefetch?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || "Failed to add species.");
     }
   };
 
   const handleDeleteSpecies = async (id) => {
     if (!window.confirm("Are you sure? This may affect linked pets.")) return;
     try {
-      const res = await fetch(`/api/species/${id}`, {
-        method: "DELETE",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        }
-      });
-      if (res.ok) {
-        toast.success("Species removed.");
-        if (selectedSpecies?.id === id) setSelectedSpecies(null);
-        fetchSpecies();
-      }
+      await api.delete(`/api/species/${id}`);
+      toast.success("Species removed.");
+      if (selectedSpecies?.id === id) setSelectedSpecies(null);
+      onRefetch?.();
     } catch {
       toast.error("Failed to delete species.");
     }
   };
 
   const handleUpdateSpecies = async (id) => {
-    if (!editSpeciesName.trim()) return;
+    if (!(editSpeciesName || "").trim()) return;
     try {
-      const res = await fetch(`/api/species/${id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify({ name: editSpeciesName.trim() })
-      });
-      if (res.ok) {
-        toast.success("Species updated.");
-        setEditingSpecies(null);
-        fetchSpecies();
-        if (selectedSpecies?.id === id) {
-          setSelectedSpecies({ ...selectedSpecies, name: editSpeciesName.trim() });
-        }
+      await api.put(`/api/species/${id}`, { name: (editSpeciesName || "").trim() });
+      toast.success("Species updated.");
+      setEditingSpecies(null);
+      onRefetch?.();
+      if (selectedSpecies?.id === id) {
+        setSelectedSpecies({ ...selectedSpecies, name: (editSpeciesName || "").trim() });
       }
     } catch {
       toast.error("Failed to update species.");
@@ -144,85 +68,59 @@ export default function SpeciesBreedsTab() {
 
   const handleAddBreed = async (e) => {
     e.preventDefault();
-    if (!newBreedName.trim() || !selectedSpecies) return;
+    if (!(newBreedName || "").trim() || !selectedSpecies) return;
     try {
-      const res = await fetch("/api/breeds", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json", 
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify({ 
-          species_id: selectedSpecies.id, 
-          name: newBreedName.trim(), 
-          default_size_category_id: newBreedDefaultSize || null,
-          status: "Active" 
-        })
+      await api.post("/api/breeds", { 
+        species_id: selectedSpecies.id, 
+        name: (newBreedName || "").trim(), 
+        default_size_category_id: newBreedDefaultSize || null,
+        status: "Active" 
       });
-      if (res.ok) {
-        toast.success("Breed added.");
-        setNewBreedName("");
-        setNewBreedDefaultSize("");
-        fetchSpecies();
-      } else {
-        const err = await res.json();
-        toast.error(err.message || "Failed to add breed.");
-      }
-    } catch {
-      toast.error("Network error.");
+      toast.success("Breed added.");
+      setNewBreedName("");
+      setNewBreedDefaultSize("");
+      onRefetch?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || "Failed to add breed.");
     }
   };
 
   const handleDeleteBreed = async (id) => {
     if (!window.confirm("Delete this breed?")) return;
     try {
-      const res = await fetch(`/api/breeds/${id}`, {
-        method: "DELETE",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        }
-      });
-      if (res.ok) {
-        toast.success("Breed removed.");
-        fetchSpecies();
-      }
+      await api.delete(`/api/breeds/${id}`);
+      toast.success("Breed removed.");
+      onRefetch?.();
     } catch {
       toast.error("Failed to delete breed.");
     }
   };
 
   const handleUpdateBreed = async (breed) => {
-    if (!editBreedName.trim()) return;
+    if (!(editBreedName || "").trim()) return;
     try {
-      const res = await fetch(`/api/breeds/${breed.id}`, {
-        method: "PUT",
-        headers: { 
-          "Content-Type": "application/json", 
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify({ 
-          species_id: breed.species_id, 
-          name: editBreedName.trim(),
-          default_size_category_id: editBreedDefaultSize || null
-        })
+      await api.put(`/api/breeds/${breed.id}`, { 
+        species_id: breed.species_id, 
+        name: (editBreedName || "").trim(),
+        default_size_category_id: editBreedDefaultSize || null
       });
-      if (res.ok) {
-        toast.success("Breed updated.");
-        setEditingBreed(null);
-        fetchSpecies();
-      } else {
-        const err = await res.json();
-        toast.error(err.message || "Failed to update breed.");
-      }
-    } catch {
-      toast.error("Failed to update breed.");
+      toast.success("Breed updated.");
+      setEditingBreed(null);
+      onRefetch?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || "Failed to update breed.");
     }
   };
 
-  if (loading) return <div className="p-6 text-zinc-500">Loading species data...</div>;
+  if (isLoading && species.length === 0) {
+    return (
+      <div className="flex h-64 items-center justify-center col-span-2">
+        <div className="text-zinc-500 animate-pulse font-medium italic tracking-widest text-xs uppercase text-center">
+          Syncing species & breeds catalog...
+        </div>
+      </div>
+    );
+  }
 
   const currentSpeciesData = species.find(s => s.id === selectedSpecies?.id);
 
@@ -240,7 +138,7 @@ export default function SpeciesBreedsTab() {
             placeholder="New Species Name..."
             className="h-10 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm focus:border-emerald-500 focus:outline-none dark:border-dark-border dark:bg-dark-surface dark:text-zinc-200"
           />
-          <button type="submit" disabled={!newSpeciesName.trim()} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+          <button type="submit" disabled={!(newSpeciesName || "").trim()} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
             <FiPlus /> Add
           </button>
         </form>
@@ -321,7 +219,7 @@ export default function SpeciesBreedsTab() {
                     <option key={cat.id} value={cat.id}>{cat.name}</option>
                   ))}
                 </select>
-                <button type="submit" disabled={!newBreedName.trim()} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                <button type="submit" disabled={!(newBreedName || "").trim()} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
                   <FiPlus /> Add
                 </button>
               </div>

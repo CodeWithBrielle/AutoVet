@@ -1,0 +1,52 @@
+export const PHILIPPINE_CITIES = {
+  // Metro Manila
+  "Quezon City": { province: "Metro Manila", zip: "1100" },
+  "Manila": { province: "Metro Manila", zip: "1000" },
+  "Makati": { province: "Metro Manila", zip: "1200" },
+  "Pasig": { province: "Metro Manila", zip: "1600" },
+  "Taguig": { province: "Metro Manila", zip: "1630" },
+  "Mandaluyong": { province: "Metro Manila", zip: "1550" },
+  "San Juan": { province: "Metro Manila", zip: "1500" },
+  "Parañaque": { province: "Metro Manila", zip: "1700" },
+  "Las Piñas": { province: "Metro Manila", zip: "1740" },
+  "Valenzuela": { province: "Metro Manila", zip: "1440" },
+  "Malabon": { province: "Metro Manila", zip: "1470" },
+  "Navotas": { province: "Metro Manila", zip: "1485" },
+  "Caloocan": { province: "Metro Manila", zip: "1400" },
+  "Marikina": { province: "Metro Manila", zip: "1800" },
+  "Pasay": { province: "Metro Manila", zip: "1300" },
+  "Muntinlupa": { province: "Metro Manila", zip: "1770" },
+ 
+  // Luzon
+  "Baguio": { province: "Benguet", zip: "2600" },
+  "Laoag": { province: "Ilocos Norte", zip: "2900" },
+  "Vigan": { province: "Ilocos Sur", zip: "2700" },
+  "Dagupan": { province: "Pangasinan", zip: "2400" },
+  "San Fernando (Pampanga)": { province: "Pampanga", zip: "2000" },
+  "Angeles": { province: "Pampanga", zip: "2009" },
+  "Batangas City": { province: "Batangas", zip: "4200" },
+  "Lipa": { province: "Batangas", zip: "4217" },
+  "Lucena": { province: "Quezon", zip: "4301" },
+  "Naga": { province: "Camarines Sur", zip: "4400" },
+  "Legazpi": { province: "Albay", zip: "4500" },
+ 
+  // Visayas
+  "Cebu City": { province: "Cebu", zip: "6000" },
+  "Mandaue": { province: "Cebu", zip: "6014" },
+  "Lapu-Lapu": { province: "Cebu", zip: "6015" },
+  "Iloilo City": { province: "Iloilo", zip: "5000" },
+  "Bacolod": { province: "Negros Occidental", zip: "6100" },
+  "Dumaguete": { province: "Negros Oriental", zip: "6200" },
+  "Tacloban": { province: "Leyte", zip: "6500" },
+  "Tagbilaran": { province: "Bohol", zip: "6300" },
+ 
+  // Mindanao
+  "Davao City": { province: "Davao del Sur", zip: "8000" },
+  "Zamboanga City": { province: "Zamboanga del Sur", zip: "7000" },
+  "Cagayan de Oro": { province: "Misamis Oriental", zip: "9000" },
+  "General Santos": { province: "South Cotabato", zip: "9500" },
+  "Butuan": { province: "Agusan del Norte", zip: "8600" },
+  "Iligan": { province: "Lanao del Norte", zip: "9200" },
+  "Cotabato City": { province: "Maguindanao", zip: "9600" },
+  "Marawi": { province: "Lanao del Sur", zip: "9700" },
+};

@@ -1,6 +1,8 @@
 import clsx from "clsx";
-import { useState } from "react";
-import { FiHome, FiSettings, FiUsers, FiBriefcase, FiArchive, FiActivity, FiDatabase } from "react-icons/fi";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { FiHome, FiSettings, FiUsers, FiBriefcase, FiArchive, FiActivity, FiDatabase, FiRefreshCw } from "react-icons/fi";
+import api from "../../utils/api";
+import { useAuth } from "../../context/AuthContext";
 
 import ClinicProfileTab from "./ClinicProfileTab";
 import UserManagementTab from "./UserManagementTab";
@@ -30,7 +32,103 @@ const tabs = [
 ];
 
 function Settings() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("data");
+  
+  // Shared Master Data State
+  const [masterData, setMasterData] = useState({
+    species: [],
+    serviceCategories: [],
+    petSizes: [],
+    weightRanges: [],
+    inventory: [],
+    inventoryCategories: [],
+    units: [],
+    loading: true,
+    error: null
+  });
+
+  const [fetchedTabs, setFetchedTabs] = useState(new Set());
+  const fetchingRef = useRef(new Set());
+
+  const fetchMasterData = useCallback(async (targets = ['core']) => {
+    if (!user?.token) return;
+    
+    // Check if we are already fetching these targets to avoid redundancy
+    const newTargets = targets.filter(t => !fetchingRef.current.has(t));
+    if (newTargets.length === 0) return;
+    
+    // Mark as fetching
+    newTargets.forEach(t => fetchingRef.current.add(t));
+    
+    // Determine what to fetch
+    const fetchSpecies = newTargets.includes('core') || newTargets.includes('data') || newTargets.includes('species') || newTargets.includes('services');
+    const fetchPetSizes = newTargets.includes('core') || newTargets.includes('data') || newTargets.includes('species') || newTargets.includes('services');
+    const fetchServiceCats = newTargets.includes('services') || newTargets.includes('data');
+    const fetchWeightRanges = newTargets.includes('services') || newTargets.includes('data');
+    const fetchInventory = newTargets.includes('services');
+    const fetchInventoryCats = newTargets.includes('data');
+    const fetchUnits = newTargets.includes('data');
+
+    setMasterData(prev => ({ ...prev, loading: true, error: null }));
+    
+    try {
+      const promises = [];
+      const keys = [];
+
+      if (fetchSpecies) { promises.push(api.get("/api/species")); keys.push('species'); }
+      if (fetchServiceCats) { promises.push(api.get("/api/service-categories")); keys.push('serviceCategories'); }
+      if (fetchPetSizes) { promises.push(api.get("/api/pet-size-categories")); keys.push('petSizes'); }
+      if (fetchWeightRanges) { promises.push(api.get("/api/weight-ranges?per_page=100")); keys.push('weightRanges'); }
+      if (fetchInventory) { promises.push(api.get("/api/inventory?per_page=100")); keys.push('inventory'); }
+      if (fetchInventoryCats) { promises.push(api.get("/api/inventory-categories")); keys.push('inventoryCategories'); }
+      if (fetchUnits) { promises.push(api.get("/api/units-of-measure")); keys.push('units'); }
+
+      const results = await Promise.all(promises);
+      
+      setMasterData(prev => {
+        const newData = { ...prev };
+        results.forEach((res, i) => {
+          const key = keys[i];
+          newData[key] = res.data?.data || res.data || [];
+        });
+        return {
+          ...newData,
+          loading: false,
+          error: null
+        };
+      });
+
+      setFetchedTabs(prev => {
+        const next = new Set(prev);
+        newTargets.forEach(t => next.add(t));
+        return next;
+      });
+    } catch (err) {
+      console.error("[Settings] Data sync failed:", err);
+      // Remove from fetchingRef so we can retry later
+      newTargets.forEach(t => fetchingRef.current.delete(t));
+      
+      setMasterData(prev => ({ 
+        ...prev, 
+        loading: false, 
+        error: "Failed to sync reference data. Some features restricted." 
+      }));
+    } finally {
+       // Only remove 'loading' if we actually fetched something or failed
+       // The individual targets remain in fetchingRef (if success) or removed (if fail)
+    }
+  }, [user?.token]);
+
+  useEffect(() => {
+    fetchMasterData(['core']);
+  }, []); // Only on mount
+
+  useEffect(() => {
+    if (!fetchedTabs.has(activeTab)) {
+      fetchMasterData([activeTab]);
+    }
+  }, [activeTab, fetchedTabs, fetchMasterData]);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_1fr]">
@@ -69,10 +167,42 @@ function Settings() {
       </aside>
 
       <main className="min-w-0">
+        {masterData.error && (
+          <div className="mb-6 flex items-center justify-between rounded-xl bg-red-50 p-4 border border-red-100 dark:bg-red-900/10 dark:border-red-900/20">
+            <div className="flex items-center gap-3">
+              <div className="text-red-600 dark:text-red-400">
+                <FiActivity size={20} />
+              </div>
+              <p className="text-sm font-medium text-red-800 dark:text-red-400">{masterData.error}</p>
+            </div>
+            <button 
+              onClick={() => fetchMasterData(['core', activeTab])}
+              className="flex items-center gap-2 rounded-lg bg-red-100 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-200 transition-colors"
+            >
+              <FiRefreshCw /> Retry Sync
+            </button>
+          </div>
+        )}
+
         {activeTab === "clinic" && <ClinicProfileTab />}
-        {activeTab === "data" && <MasterDataManagementTab />}
-        {activeTab === "services" && <ServiceManagementTab />}
-        {activeTab === "species" && <SpeciesBreedsTab />}
+        {activeTab === "data" && (
+          <MasterDataManagementTab 
+            masterData={masterData} 
+            onRefetch={fetchMasterData} 
+          />
+        )}
+        {activeTab === "services" && (
+          <ServiceManagementTab 
+            masterData={masterData} 
+            onRefetch={fetchMasterData} 
+          />
+        )}
+        {activeTab === "species" && (
+          <SpeciesBreedsTab 
+            masterData={masterData} 
+            onRefetch={fetchMasterData} 
+          />
+        )}
         {activeTab === "users" && <UserManagementTab />}
         { activeTab === "schedule" && <VetScheduleTab /> }
         { activeTab === "system" && <SystemPreferencesTab /> }

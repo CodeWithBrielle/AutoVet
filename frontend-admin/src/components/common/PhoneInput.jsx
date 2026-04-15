@@ -8,8 +8,10 @@ import clsx from 'clsx';
  */
 const PhoneInput = ({ value, onChange, error, className, placeholder = "Enter phone number" }) => {
   // Automatically normalize local PH numbers for better initialization if needed
-  const normalizedValue = typeof value === 'string' && value.startsWith('09') && value.length === 11 
-    ? `+63${value.slice(1)}` 
+  const normalizedValue = typeof value === 'string' 
+    ? (value.startsWith('09') && value.length === 11 ? `+63${value.slice(1)}` : 
+       value.startsWith('9') && value.length === 10 ? `+63${value}` : 
+       value)
     : value;
 
   return (

@@ -23,6 +23,27 @@ trait HasAuditTrail
         });
     }
 
+    /**
+     * Log a manual action not tied to a specific model event.
+     */
+    public static function logManual($action, $modelType = 'System', $modelId = 0, $old = null, $new = null)
+    {
+        try {
+            AuditLog::create([
+                'user_id' => Auth::id(),
+                'action' => $action,
+                'model_type' => $modelType,
+                'model_id' => $modelId,
+                'old_values' => $old,
+                'new_values' => $new,
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Failed to log manual audit: ' . $e->getMessage());
+        }
+    }
+
     protected function logAudit($action, $old, $new)
     {
         try {

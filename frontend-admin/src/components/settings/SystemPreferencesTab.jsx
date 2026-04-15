@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 import Toggle from "./Toggle";
 
 export default function SystemPreferencesTab() {
@@ -13,40 +14,45 @@ export default function SystemPreferencesTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
     if (!user?.token) return;
-    fetch("/api/settings", {
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Bearer ${user.token}`
-      }
-    })
-      .then((res) => res.json())
-      .then((data) => {
+    
+    setLoading(true);
+    api.get("/api/settings")
+      .then((res) => {
+        if (!isMounted) return;
+        const data = res.data;
         setMaintenanceMode(data.maintenance_mode === 'true' || data.maintenance_mode === true);
         setLoading(false);
       })
       .catch((err) => {
+        if (!isMounted) return;
+        console.error("[SystemPreferencesTab] fetch error:", err);
         setLoading(false);
       });
+
+    return () => {
+      isMounted = false;
+    };
   }, [user?.token]);
 
   const toggleMaintenance = async () => {
     const newValue = !maintenanceMode;
+    const previousValue = maintenanceMode;
+    
+    // Optimistic UI update
     setMaintenanceMode(newValue);
+    
     try {
-      await fetch("/api/settings", {
-        method: "PUT",
-        headers: { 
-          "Content-Type": "application/json", 
-          "Accept": "application/json",
-          "Authorization": `Bearer ${user?.token}`
-        },
-        body: JSON.stringify({ settings: { maintenance_mode: newValue ? 'true' : 'false' } })
+      await api.put("/api/settings", { 
+        settings: { maintenance_mode: newValue ? 'true' : 'false' } 
       });
       toast.success(newValue ? "Maintenance Mode enabled." : "Maintenance Mode disabled.");
-    } catch {
+    } catch (err) {
+      console.error("[SystemPreferencesTab] update error:", err);
       toast.error("Failed to update maintenance settings.");
-      setMaintenanceMode(!newValue);
+      // Rollback on failure
+      setMaintenanceMode(previousValue);
     }
   };
 

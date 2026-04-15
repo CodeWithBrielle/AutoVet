@@ -1,0 +1,162 @@
+[
+    {
+        "Field": "id",
+        "Type": "bigint(20) unsigned",
+        "Null": "NO",
+        "Key": "PRI",
+        "Default": null,
+        "Extra": "auto_increment"
+    },
+    {
+        "Field": "uuid",
+        "Type": "char(36)",
+        "Null": "YES",
+        "Key": "UNI",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "sync_status",
+        "Type": "varchar(30)",
+        "Null": "NO",
+        "Key": "",
+        "Default": "local_only",
+        "Extra": ""
+    },
+    {
+        "Field": "synced_at",
+        "Type": "timestamp",
+        "Null": "YES",
+        "Key": "",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "last_modified_locally_at",
+        "Type": "timestamp",
+        "Null": "YES",
+        "Key": "",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "invoice_number",
+        "Type": "varchar(191)",
+        "Null": "NO",
+        "Key": "UNI",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "pet_id",
+        "Type": "bigint(20) unsigned",
+        "Null": "NO",
+        "Key": "MUL",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "status",
+        "Type": "enum('Draft','Finalized','Paid','Partially Paid','Cancelled')",
+        "Null": "NO",
+        "Key": "",
+        "Default": "Draft",
+        "Extra": ""
+    },
+    {
+        "Field": "subtotal",
+        "Type": "decimal(10,2)",
+        "Null": "NO",
+        "Key": "",
+        "Default": "0.00",
+        "Extra": ""
+    },
+    {
+        "Field": "discount_type",
+        "Type": "enum('percentage','fixed')",
+        "Null": "NO",
+        "Key": "",
+        "Default": "percentage",
+        "Extra": ""
+    },
+    {
+        "Field": "discount_value",
+        "Type": "decimal(10,2)",
+        "Null": "NO",
+        "Key": "",
+        "Default": "0.00",
+        "Extra": ""
+    },
+    {
+        "Field": "tax_rate",
+        "Type": "decimal(5,2)",
+        "Null": "NO",
+        "Key": "",
+        "Default": "0.00",
+        "Extra": ""
+    },
+    {
+        "Field": "total",
+        "Type": "decimal(10,2)",
+        "Null": "NO",
+        "Key": "",
+        "Default": "0.00",
+        "Extra": ""
+    },
+    {
+        "Field": "amount_paid",
+        "Type": "decimal(10,2)",
+        "Null": "NO",
+        "Key": "",
+        "Default": "0.00",
+        "Extra": ""
+    },
+    {
+        "Field": "payment_method",
+        "Type": "varchar(191)",
+        "Null": "YES",
+        "Key": "",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "notes_to_client",
+        "Type": "text",
+        "Null": "YES",
+        "Key": "",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "created_at",
+        "Type": "timestamp",
+        "Null": "YES",
+        "Key": "",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "updated_at",
+        "Type": "timestamp",
+        "Null": "YES",
+        "Key": "",
+        "Default": null,
+        "Extra": ""
+    },
+    {
+        "Field": "stock_deducted",
+        "Type": "tinyint(1)",
+        "Null": "NO",
+        "Key": "",
+        "Default": "0",
+        "Extra": ""
+    },
+    {
+        "Field": "appointment_id",
+        "Type": "bigint(20) unsigned",
+        "Null": "YES",
+        "Key": "MUL",
+        "Default": null,
+        "Extra": ""
+    }
+]

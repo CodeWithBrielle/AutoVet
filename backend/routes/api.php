@@ -115,13 +115,64 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 
     // -----------------------------------------------------------------------
     // Client Notifications
-    // -----------------------------------------------------------------------
-    Route::apiResource('client-notifications/templates', NotificationTemplateController::class);
-    Route::get('/client-notifications',           [ClientNotificationController::class, 'index']);
-    Route::post('/client-notifications/send',      [ClientNotificationController::class, 'send']);
+    Route::get('/client-notifications', [\App\Http\Controllers\ClientNotificationController::class, 'index']);
+    Route::post('/client-notifications/send', [\App\Http\Controllers\ClientNotificationController::class, 'send']);
+    Route::post('/client-notifications/{notification}/retry', [\App\Http\Controllers\ClientNotificationController::class, 'retry']);
+    Route::apiResource('client-notifications/templates', \App\Http\Controllers\NotificationTemplateController::class)->names('client-notifications.templates');
 
     // -----------------------------------------------------------------------
-    // Master Data Management
+    // Inventory
+    // -----------------------------------------------------------------------
+    Route::get('/inventory',                            [InventoryController::class, 'index']);
+    Route::get('/inventory/low-stock',                  [InventoryController::class, 'lowStock']);
+    Route::get('/inventory/{inventory}/transactions',   [InventoryController::class, 'transactions']);
+    Route::put('/inventory/{inventory}',                [InventoryController::class, 'update']);
+    Route::get('/inventory/{inventory}/forecast',       [InventoryForecastController::class, 'forecast']);
+    Route::put('/inventory/{inventory}/accept-forecast-recommendation', [InventoryController::class, 'acceptForecastRecommendation'])
+         ->middleware('role:' . Roles::ADMIN->value . ',' . Roles::VETERINARIAN->value . ',' . Roles::STAFF->value);
+
+    // Inventory Write - Restricted to Clinic Management
+    Route::post('/inventory', [InventoryController::class, 'store'])
+         ->middleware('role:' . Roles::ADMIN->value . ',' . Roles::STAFF->value);
+
+    Route::delete('/inventory/{inventory}', [InventoryController::class, 'destroy'])
+         ->middleware('role:' . Roles::ADMIN->value);
+
+    // -----------------------------------------------------------------------
+    // Settings
+    // -----------------------------------------------------------------------
+    Route::get('/settings', [SettingController::class, 'index']);
+    Route::put('/settings', [SettingController::class, 'update'])
+         ->middleware('role:' . Roles::ADMIN->value);
+
+    // -----------------------------------------------------------------------
+    // Core Clinical & Administrative Resources
+    // Restricted to Clinic Staff (Admin, Vet, Staff)
+    // -----------------------------------------------------------------------
+    Route::group(['middleware' => 'role:' . implode(',', Roles::all())], function () {
+        Route::get('/dashboard/stats',                [DashboardController::class, 'getStats']);
+        Route::get('/dashboard/notifications',        [DashboardController::class, 'getNotifications']);
+        Route::get('/dashboard/sales-forecast',       [DashboardController::class, 'getSalesForecast']);
+        Route::get('/dashboard/inventory-consumption',[DashboardController::class, 'getInventoryConsumption']);
+        Route::get('/dashboard/inventory-forecast',   [DashboardController::class, 'getInventoryForecast']);
+        Route::get('/dashboard/appointment-forecast', [DashboardController::class, 'getAppointmentForecast']);
+
+        Route::apiResource('appointments',    AppointmentController::class);
+
+        Route::get('invoices/resolve-breakdown', [InvoiceController::class, 'resolveBreakdown']);
+        Route::apiResource('invoices',        InvoiceController::class);
+        Route::apiResource('services',        ServiceController::class);
+        Route::apiResource('medical-records', MedicalRecordController::class);
+        Route::get('owners/lookup',    [OwnerController::class, 'lookup']);
+        Route::apiResource('owners',          OwnerController::class);
+        Route::apiResource('pets',            \App\Http\Controllers\PetController::class);
+        Route::post('vet-schedules/bulk',    [VetScheduleController::class, 'bulkStore']);
+        Route::apiResource('vet-schedules',   VetScheduleController::class);
+        Route::post('owners/import',          [OwnerController::class, 'import']);
+    });
+
+    // -----------------------------------------------------------------------
+    // Master Data — Read access for all authenticated users
     // -----------------------------------------------------------------------
     Route::get('/inventory-categories', [\App\Http\Controllers\InventoryCategoryController::class, 'index']);
     Route::get('/service-categories',    [\App\Http\Controllers\ServiceCategoryController::class, 'index']);
@@ -157,11 +208,58 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Reporting
     // -----------------------------------------------------------------------
     Route::group(['middleware' => 'role:' . implode(',', Roles::adminRoles())], function () {
-        Route::get('/reports/revenue',                  [\App\Http\Controllers\FinancialReportController::class, 'getRevenue']);
-        Route::get('/reports/service-performance',      [\App\Http\Controllers\FinancialReportController::class, 'getServicePerformance']);
-        Route::get('/reports/inventory-usage',          [\App\Http\Controllers\InventoryReportController::class, 'getUsage']);
-        Route::get('/reports/client-acquisition',       [\App\Http\Controllers\PatientReportController::class, 'getClientAcquisition']);
-        Route::get('/reports/patient-registration-trends',   [\App\Http\Controllers\PatientReportController::class, 'getRegistrationTrends']);
-        Route::get('/patients/demographics',          [\App\Http\Controllers\PatientReportController::class, 'getDemographics']);
+        Route::post('/cms-contents',                   [CmsContentController::class, 'store']);
+        Route::put('/cms-contents/{cmsContent}',       [CmsContentController::class, 'update']);
+        Route::delete('/cms-contents/{cmsContent}',    [CmsContentController::class, 'destroy']);
     });
+
+    // -----------------------------------------------------------------------
+    // Archive & Recovery Management & Audit Log
+    // Restricted to Admin
+    // -----------------------------------------------------------------------
+    Route::group(['prefix' => 'archives', 'middleware' => 'role:' . implode(',', Roles::adminRoles())], function () {
+        Route::get('/{type}', [\App\Http\Controllers\ArchiveController::class, 'index']);
+        Route::post('/{type}/{id}/restore', [\App\Http\Controllers\ArchiveController::class, 'restore']);
+        Route::delete('/{type}/{id}/force', [\App\Http\Controllers\ArchiveController::class, 'forceDelete']);
+    });
+
+    Route::group(['middleware' => 'role:' . implode(',', Roles::adminRoles())], function () {
+        Route::get('/audit-logs', [\App\Http\Controllers\AuditLogController::class, 'index']);
+
+        // Database Backup & Restore
+        Route::get('/backups', [\App\Http\Controllers\BackupController::class, 'index']);
+        Route::post('/backups', [\App\Http\Controllers\BackupController::class, 'create']);
+        Route::post('/backups/restore', [\App\Http\Controllers\BackupController::class, 'restore']);
+        Route::delete('/backups/{filename}', [\App\Http\Controllers\BackupController::class, 'destroy']);
+        Route::get('/backups/download/{filename}', [\App\Http\Controllers\BackupController::class, 'download']);
+    });
+
+    // -----------------------------------------------------------------------
+    // Specialized Reports — restricted to Admin only
+    // -----------------------------------------------------------------------
+    $reportRoles = Roles::adminRoles();
+    Route::group(['prefix' => 'reports', 'middleware' => 'role:' . implode(',', $reportRoles)], function () {
+        Route::get('/inventory/low-stock',            [\App\Http\Controllers\LowStockReportController::class, 'generate']);
+        Route::get('/sales/revenue-summary',          [\App\Http\Controllers\SalesReportController::class, 'getRevenueSummary']);
+        Route::get('/sales/top-services',             [\App\Http\Controllers\SalesReportController::class, 'getTopServices']);
+        Route::get('/sales/transaction-volume',       [\App\Http\Controllers\SalesReportController::class, 'getTransactionVolume']);
+        Route::get('/pets/species-distribution',      [\App\Http\Controllers\PetReportController::class, 'getSpeciesDistribution']);
+        Route::get('/pets/registration-trends',       [\App\Http\Controllers\PetReportController::class, 'getRegistrationTrends']);
+        Route::get('/pets/demographics',              [\App\Http\Controllers\PetReportController::class, 'getDemographics']);
+
+        // Inventory Analytics
+        Route::get('/inventory/summary',              [\App\Http\Controllers\InventoryAnalyticsController::class, 'getSummary']);
+        Route::get('/inventory/top-moving',           [\App\Http\Controllers\InventoryAnalyticsController::class, 'getTopMoving']);
+        Route::get('/inventory/recent-movements',     [\App\Http\Controllers\InventoryAnalyticsController::class, 'getRecentMovements']);
+        Route::get('/inventory/expiring-soon',        [\App\Http\Controllers\InventoryAnalyticsController::class, 'getExpiringSoon']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Integrity & Verification Routes (Local Environment Only)
+// Gated inside controller via App::environment('local')
+// ---------------------------------------------------------------------------
+Route::group(['prefix' => 'test/integrity'], function () {
+    Route::get('/rollback', [\App\Http\Controllers\IntegrityTestController::class, 'testRollback']);
+    Route::get('/collision', [\App\Http\Controllers\IntegrityTestController::class, 'testCollision']);
 });

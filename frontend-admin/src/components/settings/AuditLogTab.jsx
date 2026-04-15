@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { FiActivity, FiSearch, FiChevronDown, FiChevronUp } from "react-icons/fi";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../utils/api";
 import clsx from "clsx";
 
 function AuditLogTab() {
@@ -17,29 +18,47 @@ function AuditLogTab() {
   });
   const [expandedId, setExpandedId] = useState(null);
 
-  const fetchLogs = () => {
-    setLoading(true);
-    const params = new URLSearchParams(filters);
-    fetch(`/api/audit-logs?${params.toString()}`, {
-      headers: {
-        "Authorization": `Bearer ${user?.token}`,
-        "Accept": "application/json"
-      }
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch audit logs");
-        return res.json();
-      })
-      .then((data) => {
-        setLogs(data.data || []);
-      })
-      .catch((err) => toast.error(err.message))
-      .finally(() => setLoading(false));
-  };
+  const hasFetchedRef = useRef(false);
 
   useEffect(() => {
-    fetchLogs();
-  }, [filters]);
+    let isMounted = true;
+
+    const fetchLogs = async () => {
+      if (!user?.token) return;
+      
+      // Show loading only on first fetch
+      if (!hasFetchedRef.current) setLoading(true);
+      
+      try {
+        const response = await api.get("/api/audit-logs", {
+          params: filters
+        });
+
+        if (!isMounted) return;
+        setLogs(response.data?.data || []);
+        hasFetchedRef.current = true;
+      } catch (err) {
+        if (!isMounted) return;
+        console.error("[AuditLogTab] fetch error:", err);
+        // Preserve existing logs on failure per plan
+        toast.error("Unable to refresh audit logs. Using cached data.");
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    // Debounce the fetch call
+    const timer = setTimeout(() => {
+      fetchLogs();
+    }, 500);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [filters, user?.token]);
 
   const toggleExpand = (id) => {
     setExpandedId(expandedId === id ? null : id);

@@ -7,11 +7,9 @@ return [
     | Cross-Origin Resource Sharing (CORS) Configuration
     |--------------------------------------------------------------------------
     |
-    | Here you may configure your settings for cross-origin resource sharing
-    | or "CORS". This determines what cross-origin operations may execute
-    | in web browsers. You are free to adjust these settings as needed.
-    |
-    | To learn more: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+    | Set FRONTEND_URL in your production .env to your Vercel deployment URL
+    | (e.g. https://autovet.vercel.app). Locally it falls back to the Vite
+    | dev server so development continues without changes.
     |
     */
 
@@ -19,7 +17,14 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'],
+    'allowed_origins' => array_filter([
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:5174',
+        'http://localhost:3000',
+        env('FRONTEND_URL'),
+    ]),
 
     'allowed_origins_patterns' => [],
 

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Traits\Archivable;
 use App\Traits\HasAuditTrail;
 use App\Traits\HasSyncFields;
+use App\Traits\HasAuditTrail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 class Service extends Model
 {
     use SoftDeletes, HasSyncFields, Archivable, HasAuditTrail;
+    protected $connection = 'mysql';
     protected $fillable = [
         'name',
         'description',
@@ -19,9 +21,12 @@ class Service extends Model
         'pricing_mode', // Legacy
         'pricing_type',
         'measurement_basis',
-        'base_price',
+        'professional_fee',
         'category',
         'status',
+        'show_on_invoice',
+        'auto_load_linked_items',
+        'allow_manual_item_override',
         // Archive tracking
         'deleted_by', 'restore_until',
         // Sync fields

@@ -14,10 +14,10 @@ import ForbiddenPage from "../pages/ForbiddenPage";
 import CalendarPage from "../pages/CalendarPage";
 import ChangePasswordPage from "../pages/ChangePasswordPage";
 import NotificationHistoryPage from "../pages/NotificationHistoryPage";
-import ClientNotificationHistoryPage from "../pages/ClientNotificationHistoryPage";
+import SentNotificationsPage from "../pages/SentNotificationsPage";
 import ProtectedRoute from "../components/auth/ProtectedRoute";
 import {
-  ADMIN_ONLY,
+  FULL_ACCESS_ROLES,
   ALL_ROLES
 } from "../constants/roles";
 
@@ -115,7 +115,7 @@ export const router = createBrowserRouter([
       {
         path: "reports",
         element: (
-          <ProtectedRoute allowedRoles={ADMIN_ONLY}>
+          <ProtectedRoute allowedRoles={FULL_ACCESS_ROLES}>
             <ReportsPage />
           </ProtectedRoute>
         ),
@@ -124,7 +124,7 @@ export const router = createBrowserRouter([
       {
         path: "settings",
         element: (
-          <ProtectedRoute allowedRoles={ADMIN_ONLY}>
+          <ProtectedRoute allowedRoles={FULL_ACCESS_ROLES}>
             <SettingsPage />
           </ProtectedRoute>
         ),
@@ -152,10 +152,10 @@ export const router = createBrowserRouter([
         path: "client-notifications",
         element: (
           <ProtectedRoute allowedRoles={ALL_ROLES}>
-            <ClientNotificationHistoryPage />
+            <SentNotificationsPage />
           </ProtectedRoute>
         ),
-        handle: { title: "Client Notifications" },
+        handle: { title: "Sent Notifications Audit" },
       }
     ],
   },

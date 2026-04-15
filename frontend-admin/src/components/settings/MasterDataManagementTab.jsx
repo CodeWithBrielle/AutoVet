@@ -3,7 +3,7 @@ import WeightRangesManager from "./WeightRangesManager";
 import { FiCheckCircle } from "react-icons/fi";
 import clsx from "clsx";
 
-export default function MasterDataManagementTab() {
+export default function MasterDataManagementTab({ masterData, onRefetch }) {
   const categoryColumns = [
     { key: "name", label: "Category Name" },
     { 
@@ -82,10 +82,12 @@ export default function MasterDataManagementTab() {
         <div className="card-shell p-6 transition-all hover:shadow-md">
           <MasterDataTable 
             title="Inventory Categories"
-            description="Categorize items in your stock (e.g., Medications, Consumables)."
+            description="Categorize items in your stock (e.g., Medications, Supplies)."
             apiUrl="/api/inventory-categories"
             columns={categoryColumns}
             initialForm={initialCategoryForm}
+            initialData={masterData?.inventoryCategories}
+            isLoading={masterData?.loading}
           />
         </div>
         
@@ -96,6 +98,8 @@ export default function MasterDataManagementTab() {
             apiUrl="/api/service-categories"
             columns={categoryColumns}
             initialForm={initialCategoryForm}
+            initialData={masterData?.serviceCategories}
+            isLoading={masterData?.loading}
           />
         </div>
 
@@ -138,7 +142,12 @@ export default function MasterDataManagementTab() {
                 </div>
               </div>
             </div>
-            <WeightRangesManager />
+            <WeightRangesManager 
+              species={masterData?.species || []} 
+              sizeCategories={masterData?.petSizes || []} 
+              isLoading={masterData?.loading}
+              onRefetch={onRefetch}
+            />
           </div>
         </div>
 
@@ -149,6 +158,8 @@ export default function MasterDataManagementTab() {
             apiUrl="/api/units-of-measure"
             columns={unitColumns}
             initialForm={{ name: "", abbreviation: "", status: "Active" }}
+            initialData={masterData?.units}
+            isLoading={masterData?.loading}
           />
         </div>
       </div>

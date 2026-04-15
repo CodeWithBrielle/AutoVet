@@ -35,6 +35,11 @@ class InvoiceFinalizationService
 
             // Loop through items
             foreach ($invoice->items as $item) {
+                // strict phase 2 rules
+                if (!$item->is_confirmed_used || $item->is_removed_from_template) {
+                    continue;
+                }
+
                 if ($item->inventory_id) {
                     $inventoryItem = Inventory::where('id', $item->inventory_id)->lockForUpdate()->first();
 
@@ -95,6 +100,69 @@ class InvoiceFinalizationService
                 "Invoice #{$invoice->invoice_number} for {$invoice->pet->name} has been finalized. Total: ₱" . number_format($invoice->total, 2),
                 ['invoice_id' => $invoice->id]
             );
+
+            \Illuminate\Support\Facades\DB::table('invoice_audit_logs')->insert([
+                'invoice_id' => $invoice->id,
+                'user_id' => auth()->id() ?? null,
+                'action' => 'finalized_invoice',
+                'entity' => 'all',
+                'new_value' => 'Stock Deducted',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
+    }
+
+    /**
+     * Reverse inventory deduction if an invoice is cancelled.
+     *
+     * @param Invoice $invoice
+     * @return void
+     * @throws Exception
+     */
+    public function reverseStockDeduction(Invoice $invoice)
+    {
+        DB::transaction(function () use ($invoice) {
+            if (!$invoice->stock_deducted) {
+                return;
+            }
+
+            foreach ($invoice->items as $item) {
+                if ($item->inventory_id && $item->is_confirmed_used && !$item->is_removed_from_template) {
+                    $inventoryItem = Inventory::where('id', $item->inventory_id)->lockForUpdate()->first();
+
+                    if (!$inventoryItem) {
+                        continue;
+                    }
+
+                    $oldStock = $inventoryItem->stock_level;
+                    $inventoryItem->stock_level += $item->qty;
+                    $inventoryItem->save();
+
+                    InventoryTransaction::create([
+                        'inventory_id' => $inventoryItem->id,
+                        'transaction_type' => 'Stock Correction (Reversal)',
+                        'quantity' => $item->qty,
+                        'previous_stock' => $oldStock,
+                        'new_stock' => $inventoryItem->stock_level,
+                        'remarks' => "Reversed deduction from Invoice #{$invoice->invoice_number} (Cancellation)",
+                        'created_by' => auth()->id() ?? (\App\Models\User::first()->id ?? null)
+                    ]);
+                }
+            }
+
+            $invoice->stock_deducted = false;
+            $invoice->save();
+
+            \Illuminate\Support\Facades\DB::table('invoice_audit_logs')->insert([
+                'invoice_id' => $invoice->id,
+                'user_id' => auth()->id() ?? null,
+                'action' => 'cancelled_invoice_reversal',
+                'entity' => 'all',
+                'new_value' => 'Stock Restored',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         });
     }
 }
