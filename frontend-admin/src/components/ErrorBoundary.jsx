@@ -14,11 +14,11 @@ import { FiAlertTriangle, FiRefreshCw } from "react-icons/fi";
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
   }
 
   componentDidCatch(error, info) {
@@ -26,7 +26,7 @@ class ErrorBoundary extends Component {
   }
 
   handleReset() {
-    this.setState({ hasError: false });
+    this.setState({ hasError: false, error: null });
   }
 
   render() {

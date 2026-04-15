@@ -14,6 +14,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  const sanitizeUser = (data: any) => {
+    if (!data) return null;
+    return {
+      ...data,
+      name: typeof data.name === 'string' ? data.name : (data.name?.message || data.name?.text || String(data.name || 'User')),
+    };
+  };
+
   useEffect(() => {
     // Try to load user from localStorage
     const stored = localStorage.getItem("user");
@@ -24,10 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (parsed && (parsed.token || (parsed.user && parsed.user.token))) {
           // If nested, flatten it (similar to admin migration)
           const userData = parsed.token ? parsed : { ...parsed.user, token: parsed.user.token };
-          setUser(userData);
-          if (!parsed.token) {
-            localStorage.setItem("user", JSON.stringify(userData));
-          }
+          setUser(sanitizeUser(userData));
         } else {
           localStorage.removeItem("user");
           setUser(null);
@@ -41,13 +46,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = (data: any) => {
-    setUser(data);
-    localStorage.setItem("user", JSON.stringify(data));
+    if (data && (data.error || (data.message && !data.token))) {
+      console.error("AuthContext: Attempted to login with error data", data);
+      return;
+    }
+    const sanitized = sanitizeUser(data);
+    setUser(sanitized);
+    localStorage.setItem("user", JSON.stringify(sanitized));
   };
 
   const register = (data: any) => {
-    setUser(data);
-    localStorage.setItem("user", JSON.stringify(data));
+    if (data && (data.error || (data.message && !data.token))) {
+      console.error("AuthContext: Attempted to register with error data", data);
+      return;
+    }
+    const sanitized = sanitizeUser(data);
+    setUser(sanitized);
+    localStorage.setItem("user", JSON.stringify(sanitized));
   };
 
   const logout = () => {
