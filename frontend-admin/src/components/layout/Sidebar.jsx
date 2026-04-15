@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { NavLink } from "react-router-dom";
 import { FiX } from "react-icons/fi";
-import { LuPawPrint } from "react-icons/lu";
+import logo from "../../assets/logo.png";
 
 function NavItem({ item, onClose }) {
   const Icon = item.icon;
@@ -50,13 +50,11 @@ function Sidebar({ items, bottomItems, clinic, isOpen, onClose }) {
       >
         <div className="border-b border-zinc-200 p-6 dark:border-dark-border">
           <div className="flex flex-col items-center text-center">
-            {clinic.logo ? (
-              <img src={clinic.logo} alt="Clinic Logo" className="mb-3 h-14 w-14 rounded-xl object-contain" />
-            ) : (
-              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600 dark:bg-emerald-600/20 dark:text-emerald-400">
-                <LuPawPrint className="h-7 w-7" />
-              </div>
-            )}
+            <img 
+              src={clinic.logo || logo} 
+              alt="Clinic Logo" 
+              className="mb-3 h-14 w-14 rounded-xl object-contain" 
+            />
             <div>
               <p className="text-lg font-bold leading-tight text-zinc-900 dark:text-zinc-50">{clinic.name}</p>
               {clinic.subtitle && (
