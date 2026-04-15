@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
@@ -32,6 +33,39 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
         });
+
+        // Data Migration Logic
+        if (Schema::hasTable('users')) {
+            $users = DB::table('users')->get();
+            foreach ($users as $user) {
+                if (in_array($user->role, ['admin', 'veterinarian', 'staff'])) {
+                    DB::table('admins')->insert([
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'password' => $user->password,
+                        'role' => $user->role,
+                        'status' => $user->status ?? 'active',
+                        'avatar' => $user->avatar,
+                        'must_change_password' => $user->must_change_password ?? false,
+                        'created_at' => $user->created_at,
+                        'updated_at' => $user->updated_at,
+                        'deleted_at' => $user->deleted_at,
+                    ]);
+                } else if ($user->role === 'owner') {
+                    DB::table('portal_users')->insert([
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'password' => $user->password,
+                        'status' => $user->status ?? 'active',
+                        'created_at' => $user->created_at,
+                        'updated_at' => $user->updated_at,
+                        'deleted_at' => $user->deleted_at,
+                    ]);
+                }
+            }
+        }
     }
 
     public function down(): void

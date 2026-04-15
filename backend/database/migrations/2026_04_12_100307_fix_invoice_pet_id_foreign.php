@@ -14,16 +14,11 @@ return new class extends Migration
     {
         Schema::table('invoices', function (Blueprint $table) {
             // Drop the old constraint that points to the non-existent or wrong 'patients' table
-            // Based on investigation, the constraint name is 'invoices_patient_id_foreign'
+            // Based on investigation, the constraint name is 'invoices_pet_id_foreign'
             try {
-                $table->dropForeign('invoices_patient_id_foreign');
+                $table->dropForeign('invoices_pet_id_foreign');
             } catch (\Exception $e) {
-                // If it fails, try to drop by array syntax
-                try {
-                    $table->dropForeign(['pet_id']);
-                } catch (\Exception $e2) {
-                    // Ignore if it doesn't exist
-                }
+                // Ignore if it doesn't exist
             }
 
             // Add the correct constraint pointing to 'pets' table
