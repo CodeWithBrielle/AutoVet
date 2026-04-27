@@ -15,19 +15,44 @@ class PatientOwnerController extends Controller
     {
         $user = auth('admin_api')->user() ?? auth('portal_api')->user();
 
-        $query = Owner::with(['pets']);
+        // Optimized query with required relationships and total paid sum calculation
+        $query = Owner::with(['pets', 'user'])
+            ->addSelect([
+                'total_paid_sum' => \App\Models\Invoice::selectRaw('IFNULL(SUM(total), 0)')
+                    ->join('pets', 'pets.id', '=', 'invoices.pet_id')
+                    ->whereColumn('pets.owner_id', 'owners.id')
+                    ->whereIn('invoices.status', ['Paid', 'Finalized'])
+            ]);
+
+        // Always hide AI Training Records from the list for Admins/Staff
+        $query->where('email', '!=', 'dataset.seeder@autovet.ai');
 
         if ($user instanceof \App\Models\PortalUser) {
             $query->where('id', $user->owner?->id);
         }
 
-        $query->orderBy('created_at', 'desc');
-
-        if ($request->has('per_page')) {
-            return response()->json($query->paginate($request->per_page));
+        // Add Search functionality
+        if ($request->has('search') && !empty($request->get('search'))) {
+            $search = $request->get('search');
+            $query->where(function($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('address', 'like', "%{$search}%");
+            });
         }
 
-        return response()->json($query->get());
+        // Filter: With Pets
+        if ($request->get('filter') === 'With Pets') {
+            $query->has('pets');
+        }
+
+        $query->orderBy('created_at', 'desc');
+
+        $perPage = $request->get('per_page', 10);
+        $paginated = $query->paginate($perPage);
+
+        return response()->json($paginated);
     }
 
     /**
@@ -58,12 +83,19 @@ class PatientOwnerController extends Controller
         }
 
         $owner = Owner::create($validated);
+
+        // Broadcast for real-time dashboard stats
+        event(new \App\Events\EntityCreated('owner', $owner->id));
+
         return response()->json($owner, 201);
+
     }
 
     public function show(Owner $owner)
     {
-        return response()->json($owner->load('pets.species', 'pets.breed'));
+        $owner->load(['pets.species', 'pets.breed', 'pets.sizeCategory', 'pets.invoices', 'pets.appointments']);
+        $owner->pets->each->append(['total_paid', 'total_due', 'last_visit', 'next_due']);
+        return response()->json($owner);
     }
 
     public function update(Request $request, Owner $owner)
@@ -79,7 +111,26 @@ class PatientOwnerController extends Controller
         ]);
 
         $owner->update($validated);
-        return response()->json($owner->load('pets'));
+
+        // Sync with PortalUser if exists
+        if ($owner->user_id) {
+            $user = \App\Models\PortalUser::find($owner->user_id);
+            if ($user) {
+                $user->update([
+                    'name' => $validated['name'],
+                    'email' => $validated['email'],
+                    'phone' => $validated['phone'],
+                    'address' => $validated['address'],
+                    'city' => $validated['city'],
+                    'province' => $validated['province'],
+                    'zip' => $validated['zip'],
+                ]);
+            }
+        }
+
+        $owner->load(['pets.species', 'pets.breed', 'pets.sizeCategory', 'pets.invoices', 'pets.appointments']);
+        $owner->pets->each->append(['total_paid', 'total_due', 'last_visit', 'next_due']);
+        return response()->json($owner);
     }
 
     public function destroy(Owner $owner)

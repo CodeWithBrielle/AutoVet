@@ -28,7 +28,9 @@ class DatabaseSeeder extends Seeder
             PHClinicAISeeder::class, // Run before PortalUserSeeder because it truncates owners
             PortalUserSeeder::class,
             ServicesSeeder::class,
+            ServiceForecastDatasetSeeder::class,
             DashboardAIForecastSeeder::class,
+            PatientPetSeeder::class,
         ]);
     }
 }

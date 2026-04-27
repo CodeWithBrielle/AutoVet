@@ -4,17 +4,22 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+use App\Traits\HasClinic;
+
 class InventoryUsageHistory extends Model
 {
+    use HasClinic;
+
     protected $table = 'inventory_usage_history';
 
     /**
      * Source types that represent true verified consumption and are safe to use
      * as AI forecast input. Excludes manual adjustments and non-sale events.
      */
-    public const FORECASTING_SAFE_SOURCES = ['retail_sale', 'service_consumable'];
+    public const FORECASTING_SAFE_SOURCES = ['retail_sale', 'service_consumable', 'manual_adjustment'];
 
     protected $fillable = [
+        'clinic_id',
         'inventory_id',
         'invoice_id',
         'invoice_item_id',

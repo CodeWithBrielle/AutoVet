@@ -21,7 +21,7 @@ class AppointmentCreated implements ShouldBroadcast
      */
     public function __construct(Appointment $appointment)
     {
-        $this->appointment = $appointment->load(['pet', 'service', 'vet']);
+        $this->appointment = $appointment->load(['pet.owner', 'service', 'vet']);
     }
 
     /**

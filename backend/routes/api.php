@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\InventoryForecastController;
+use App\Http\Controllers\ImportController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Enums\Roles;
@@ -10,6 +11,7 @@ use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\AppointmentStatusController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ForecastController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\MedicalRecordController;
@@ -44,6 +46,7 @@ Route::post('/login',           [AuthController::class, 'login'])->name('login')
 Route::post('/register',        [AuthController::class, 'register']);
 Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
 Route::post('/password/reset',  [AuthController::class, 'resetPassword']);
+Route::get('/register/verify', [AuthController::class, 'verifyRegistration'])->name('registration.verify');
 
 // Test endpoint to check API status
 Route::get('/status', function () {
@@ -88,7 +91,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('/portal/overview',                 [DashboardController::class, 'getPortalOverview']);
     Route::get('/dashboard/stats',                 [DashboardController::class, 'getStats']);
     Route::get('/dashboard/notifications',         [DashboardController::class, 'getNotifications']);
-    Route::post('/dashboard/notifications/mark-all-read', [DashboardController::class, 'markNotificationsRead']);
+    Route::post('/dashboard/notifications/mark-all-read', [DashboardController::class, 'markAllRead']);
+    Route::post('/dashboard/notifications/clear-all', [DashboardController::class, 'clearAll']);
     Route::post('/dashboard/notifications/{id}/dismiss', [DashboardController::class, 'dismissNotification']);
     Route::get('/dashboard/inventory-consumption', [DashboardController::class, 'getInventoryConsumption']);
     Route::get('/dashboard/sales-forecast',        [DashboardController::class, 'getSalesForecast']);
@@ -98,6 +102,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('/dashboard/appointment-forecast',  [DashboardController::class, 'getAppointmentForecast']);
     Route::get('/dashboard/service-forecast',      [DashboardController::class, 'getServiceForecast']);
     Route::get('/dashboard/patient-visit-predictions', [DashboardController::class, 'getPatientVisitPredictions']);
+    Route::get('/dashboard/appointments/today',    [DashboardController::class, 'appointmentsToday']);
+    Route::get('/dashboard/appointments/upcoming', [DashboardController::class, 'appointmentsUpcoming']);
+    Route::get('/dashboard/pets',                  [DashboardController::class, 'petsList']);
+    Route::get('/dashboard/clients',               [DashboardController::class, 'clientsList']);
+    Route::get('/dashboard/appointments/cancelled',[DashboardController::class, 'appointmentsCancelled']);
 
     // -----------------------------------------------------------------------
     // Core Modules
@@ -106,8 +115,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('appointments/{appointment}/decline', [AppointmentStatusController::class, 'decline']);
     Route::post('appointments/{appointment}/remind', [AppointmentStatusController::class, 'remind']);
     Route::get('/appointments/availability',      [\App\Http\Controllers\AppointmentController::class, 'getAvailability']);
+    // Service Forecasts
+    Route::get('/forecast/services',         [ForecastController::class, 'services']);
+    Route::get('/forecast/services/history', [ForecastController::class, 'history']);
+    Route::get('/appointments/summary', [AppointmentController::class, 'summary']);
     Route::apiResource('appointments', AppointmentController::class);
-
     // Inventory and Specialized Forecast
     Route::get('inventory/low-stock',     [InventoryController::class, 'lowStock']);
     Route::get('inventory/{inventory}/transactions', [InventoryController::class, 'transactions']);
@@ -125,7 +137,15 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::apiResource('pets',            \App\Http\Controllers\PetController::class);
     Route::post('vet-schedules/bulk',    [VetScheduleController::class, 'bulkStore']);
     Route::apiResource('vet-schedules',   VetScheduleController::class);
-    Route::post('owners/import',          [PatientOwnerController::class, 'import']);
+    
+    // Data Import Routes
+    Route::prefix('import')->group(function () {
+        Route::post('/owners', [ImportController::class, 'importOwners']);
+        Route::post('/appointments', [ImportController::class, 'importAppointments']);
+        Route::post('/invoices', [ImportController::class, 'importInvoices']);
+        Route::post('/inventory-usage', [ImportController::class, 'importInventoryUsage']);
+        Route::post('/services', [ImportController::class, 'importServices']);
+    });
 
     // -----------------------------------------------------------------------
     // Client Notifications
@@ -166,6 +186,36 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // -----------------------------------------------------------------------
     // System Administration
     // -----------------------------------------------------------------------
+    Route::get('/system-announcements', function() {
+        return response()->json(
+            \App\Models\SystemAnnouncement::where('is_active', true)
+                ->where(function($q) {
+                    $q->whereNull('active_until')
+                      ->orWhere('active_until', '>=', \Carbon\Carbon::now('UTC'));
+                })
+                ->orderBy('created_at', 'desc')
+                ->get()
+        );
+    });
+
+    Route::group(['middleware' => 'role:super_admin'], function () {
+        Route::get('/super-admin/stats', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'stats']);
+        Route::get('/super-admin/clinics', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'clinics']);
+        Route::post('/super-admin/clinics', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'storeClinic']);
+        Route::put('/super-admin/clinics/{clinic}', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'updateClinic']);
+        Route::post('/super-admin/clinics/{clinic}/toggle-status', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'toggleStatus']);
+        
+        // Super Admin Powers
+        Route::get('/super-admin/clinics/{clinic}/admins', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'clinicAdmins']);
+        Route::post('/super-admin/clinics/{clinic}/admins/{admin}/reset-password', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'resetClinicAdminPassword']);
+        Route::post('/super-admin/impersonate/{clinic}', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'impersonate']);
+        Route::get('/super-admin/system-logs', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'systemLogs']);
+        Route::get('/super-admin/announcements', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'announcements']);
+        Route::post('/super-admin/announcements', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'storeAnnouncement']);
+        Route::put('/super-admin/announcements/{announcement}', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'updateAnnouncement']);
+        Route::delete('/super-admin/announcements/{announcement}', [\App\Http\Controllers\Api\SuperAdminDashboardController::class, 'destroyAnnouncement']);
+    });
+
     Route::group(['middleware' => 'role:' . implode(',', Roles::adminRoles())], function () {
         // Audit Logs
         Route::get('/audit-logs', [AuditLogController::class, 'index']);
